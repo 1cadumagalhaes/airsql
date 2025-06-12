@@ -1,4 +1,4 @@
-name: Build and Publish
+name: Build and Release
 
 on:
   push:
@@ -38,12 +38,12 @@ jobs:
     - name: Build package
       run: uv build
 
-  publish:
+  release:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
-      id-token: write  # For trusted publishing
+      contents: write  # For creating releases
     
     steps:
     - uses: actions/checkout@v4
@@ -61,10 +61,12 @@ jobs:
     - name: Build package
       run: uv build
     
-    - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      # Uses trusted publishing - no API token needed
-      # Make sure to configure trusted publishing in PyPI settings
-      # Alternative: uncomment the lines below and add PYPI_API_TOKEN to secrets
-      # with:
-      #   password: ${{ secrets.PYPI_API_TOKEN }}
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
+        generate_release_notes: true
+        draft: false
+        prerelease: false
