@@ -1,0 +1,68 @@
+[project]
+name = "airsql"
+version = "0.1.0"
+description = "A decorator-based SQL execution framework for Airflow"
+readme = "README.md"
+authors = [{ name = "1cadumagalhaes", email = "github@cadumagalhaes.dev" }]
+requires-python = ">=3.12"
+dependencies = [
+    "apache-airflow-providers-common-sql>=1.27.1",
+    "apache-airflow-providers-postgres>=6.2.0",
+    "apache-airflow[google,standard]>=3.0.0",
+    "pandas>=2.0.0",
+    "pydantic>=2.0.0",
+    "jinja2>=3.0.0",
+]
+
+[project.scripts]
+airsql = "airsql:main"
+
+[build-system]
+requires = ["uv_build>=0.7.4,<0.8"]
+build-backend = "uv_build"
+
+
+[tool.pyright]
+reportArgumentType = "none"
+typeCheckingMode = "off"
+reportOptionalIterable = false
+reportAttributeAccessIssue = false
+reportPossiblyUnboundVariable = false
+reportOptionalMemberAccess = false
+reportGeneralTypeIssues = false
+reportOperatorIssue = false
+reportCallIssue = false
+reportOptionalOperand = false
+reportMissingImports = false
+reportUnusedExpression = false
+reportUnsupportedDunderAll = false
+venv = ".venv"
+exclude = [".venv"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+preview = true
+select = ['I', 'F', 'E', 'W', 'PL', 'PT', 'C', 'B', 'ASYNC', "BLE", "S", "FAST"]
+ignore = [
+    'PLR0913',
+    'PLR0917',
+    'BLE001',
+    'E501',
+    #   "B904",
+    #   "C901",
+    #   "B008",
+    #   "PT028",
+    #   "S101",
+    #   "S105",
+    #   "S608",
+    #   "PLR6301",
+]
+
+[tool.ruff.format]
+preview = true
+quote-style = 'single'
+docstring-code-format = true
