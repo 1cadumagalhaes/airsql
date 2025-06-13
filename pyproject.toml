@@ -1,6 +1,6 @@
 [project]
 name = "airsql"
-version = "0.1.0"
+version = "0.1.1"
 description = "A decorator-based SQL execution framework for Airflow"
 readme = "README.md"
 authors = [{ name = "1cadumagalhaes", email = "github@cadumagalhaes.dev" }]
