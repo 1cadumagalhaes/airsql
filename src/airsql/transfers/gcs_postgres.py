@@ -40,6 +40,16 @@ class GCSToPostgresOperator(BaseOperator):
             'updated_at',
         }
 
+    @staticmethod
+    def _dataframe_to_tuples(df):
+        """Convert DataFrame to tuples with proper type conversion for PostgreSQL."""
+        # This automatically converts numpy types to Python native types
+        df_converted = df.convert_dtypes()
+
+        df_converted = df_converted.replace({pd.NA: None, np.nan: None})
+
+        return [tuple(row) for row in df_converted.values.tolist()]
+
     def _grant_table_privileges(self, pg_hook, schema, table_name_simple):
         """Grant all privileges on table to public."""
         conn = pg_hook.get_conn()
@@ -162,7 +172,7 @@ class GCSToPostgresOperator(BaseOperator):
                 columns=psycopg2_sql.SQL(', ').join(insert_cols_ident),
             )
 
-            data_tuples = [tuple(x) for x in df_filtered.to_numpy()]
+            data_tuples = self._dataframe_to_tuples(df_filtered)
 
             execute_values(
                 cursor,
@@ -247,7 +257,7 @@ class GCSToPostgresOperator(BaseOperator):
                 update_sql_part,
             ])
 
-            data_tuples = [tuple(x) for x in df_filtered.to_numpy()]
+            data_tuples = self._dataframe_to_tuples(df_filtered)
 
             execute_values(
                 cursor,
