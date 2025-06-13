@@ -2,6 +2,8 @@
 File class for representing SQL files with Jinja templating support.
 """
 
+import inspect
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -59,7 +61,7 @@ class File:
 
         return self._content
 
-    def render(self, context: Optional[Dict[str, Any]] = None) -> str:
+    def render(self, context: Optional[Dict[str, Any]] = None) -> str:  # noqa: C901
         """
         Render the SQL file with Jinja templating.
 
@@ -75,23 +77,50 @@ class File:
                 raise FileNotFoundError(f'SQL file not found: {sql_path}')
             sql_content = sql_path.read_text(encoding='utf-8')
         else:
+            # First, try to find the file relative to the calling file's directory
+            caller_dir = None
+            frame = inspect.currentframe()
             try:
-                search_paths = ['dags/git_sql', 'sql/', 'dags/sql']
+                # Walk up the call stack to find the caller outside of this File class
+                caller_frame = frame
+                while caller_frame:
+                    caller_frame = caller_frame.f_back
+                    if caller_frame and caller_frame.f_code.co_filename != __file__:
+                        caller_dir = os.path.dirname(
+                            os.path.abspath(caller_frame.f_code.co_filename)
+                        )
+                        relative_sql_path = os.path.join(caller_dir, self.file_path)
+                        if os.path.exists(relative_sql_path):
+                            sql_content = Path(relative_sql_path).read_text(
+                                encoding='utf-8'
+                            )
+                            break
+                        break
+            finally:
+                del frame
 
-                env = Environment(
-                    loader=FileSystemLoader(search_paths),
-                    autoescape=select_autoescape(['html', 'xml']),
-                )
+            # If not found relative to caller, try the configured search paths
+            if 'sql_content' not in locals():
+                try:
+                    search_paths = ['dags/git_sql', 'sql/', 'dags/sql']
+                    # Add caller directory to search paths if available
+                    if caller_dir:
+                        search_paths.insert(0, caller_dir)
 
-                template = env.get_template(self.file_path)
-                sql_content = template.source
+                    env = Environment(
+                        loader=FileSystemLoader(search_paths),
+                        autoescape=select_autoescape(['html', 'xml']),
+                    )
 
-            except Exception as e:
-                search_paths_str = ', '.join(search_paths)
-                raise FileNotFoundError(
-                    f'SQL file not found: {self.file_path}. '
-                    f'Searched in: {search_paths_str}'
-                ) from e
+                    template = env.get_template(self.file_path)
+                    sql_content = template.source
+
+                except Exception as e:
+                    search_paths_str = ', '.join(search_paths)
+                    raise FileNotFoundError(
+                        f'SQL file not found: {self.file_path}. '
+                        f'Searched in: {search_paths_str}'
+                    ) from e
 
         if not self.variables and not context:
             return sql_content

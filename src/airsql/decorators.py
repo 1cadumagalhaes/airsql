@@ -70,6 +70,26 @@ class SQLDecorators:
             else:
                 raise FileNotFoundError(f'SQL file not found: {sql_file}')
 
+        # First, try to find the file relative to the calling file's directory
+        frame = inspect.currentframe()
+        try:
+            # Walk up the call stack to find the caller outside of this decorator class
+            caller_frame = frame
+            while caller_frame:
+                caller_frame = caller_frame.f_back
+                if caller_frame and caller_frame.f_code.co_filename != __file__:
+                    caller_dir = os.path.dirname(
+                        os.path.abspath(caller_frame.f_code.co_filename)
+                    )
+                    relative_sql_path = os.path.join(caller_dir, sql_file)
+                    if os.path.exists(relative_sql_path):
+                        file_obj = File(relative_sql_path, variables=template_vars)
+                        return file_obj.render()
+                    break
+        finally:
+            del frame
+
+        # Fall back to the configured sql_files_path
         if not self.jinja_env:
             raise ValueError(f'SQL files directory not found: {self.sql_files_path}')
 
