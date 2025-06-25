@@ -13,6 +13,7 @@ from airflow.sdk import get_current_context
 from google.cloud import bigquery
 from psycopg2 import sql as psycopg2_sql
 from psycopg2.extras import execute_values
+from sqlalchemy import text
 
 from airsql.table import Table
 
@@ -111,12 +112,29 @@ class SQLHookManager:
 
         df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
 
-        if table.is_bigquery:
+        if if_exists == 'truncate':
+            # Use truncate method to preserve table structure and sequences
+            self.truncate_table_content(df_with_timestamps, table, timestamp_column)
+        elif table.is_bigquery:
             self._write_to_bigquery(df_with_timestamps, table, if_exists)
         elif table.is_postgres:
             self._write_to_postgres(df_with_timestamps, table, if_exists)
         else:
-            raise ValueError(f'Unsupported database type for table: {table}')
+            # Get connection type for better error message
+            try:
+                connection = BaseHook.get_connection(table.conn_id)
+                conn_type = connection.conn_type if connection.conn_type else 'unknown'
+                raise ValueError(
+                    f'Unsupported database type for table: {table}. '
+                    f'Connection ID "{table.conn_id}" has type "{conn_type}". '
+                    f'Supported types are: google_cloud_platform, gccpigquery, bigquery (BigQuery), postgres, postgresql'
+                )
+            except Exception as e:
+                if 'Unsupported database type' in str(e):
+                    raise e
+                raise ValueError(
+                    f'Unsupported database type for table: {table}. Error getting connection: {e}'
+                ) from e
 
     def replace_table_content(
         self, df: pd.DataFrame, table: Table, timestamp_column: Optional[str] = None
@@ -158,6 +176,34 @@ class SQLHookManager:
             )
         else:
             raise ValueError(f'Unsupported database type for table: {table}')
+
+    def truncate_table_content(
+        self, df: pd.DataFrame, table: Table, timestamp_column: Optional[str] = None
+    ) -> None:
+        """Truncate the content of a table and insert new data, preserving table structure and sequences."""
+        df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
+
+        if table.is_bigquery:
+            # For BigQuery, truncate is equivalent to replace as it doesn't have sequences
+            self._replace_bigquery_table(df_with_timestamps, table)
+        elif table.is_postgres:
+            self._truncate_postgres_table(df_with_timestamps, table)
+        else:
+            # Get connection type for better error message
+            try:
+                connection = BaseHook.get_connection(table.conn_id)
+                conn_type = connection.conn_type if connection.conn_type else 'unknown'
+                raise ValueError(
+                    f'Unsupported database type for table: {table}. '
+                    f'Connection ID "{table.conn_id}" has type "{conn_type}". '
+                    f'Supported types are: google_cloud_platform, gccpigquery, bigquery (BigQuery), postgres, postgresql'
+                )
+            except Exception as e:
+                if 'Unsupported database type' in str(e):
+                    raise e
+                raise ValueError(
+                    f'Unsupported database type for table: {table}. Error getting connection: {e}'
+                ) from e
 
     @staticmethod
     def _get_bigquery_schema(hook: BigQueryHook, table: Table) -> List[Dict[str, Any]]:
@@ -497,3 +543,34 @@ WHEN NOT MATCHED THEN
         finally:
             cursor.close()
             conn.close()
+
+    @staticmethod
+    def _truncate_postgres_table(df: pd.DataFrame, table: Table) -> None:
+        """Truncate Postgres table content, preserving table structure and sequences."""
+        hook = PostgresHook(postgres_conn_id=table.conn_id)
+        engine = hook.get_sqlalchemy_engine()
+
+        if '.' in table.table_name:
+            schema_name, table_name = table.table_name.split('.', 1)
+            full_table_name = f'"{schema_name}"."{table_name}"'
+        else:
+            schema_name = None
+            table_name = table.table_name
+            full_table_name = f'"{table_name}"'
+
+        # Use a transaction to ensure atomicity
+        with engine.begin() as conn:
+            # TRUNCATE preserves table structure and resets sequences
+            # RESTART IDENTITY resets any auto-increment sequences
+            truncate_sql = f'TRUNCATE TABLE {full_table_name} RESTART IDENTITY'
+            conn.execute(text(truncate_sql))
+
+            # Insert new data
+            df.to_sql(
+                table_name,
+                conn,
+                schema=schema_name,
+                if_exists='append',
+                index=False,
+                method='multi',
+            )

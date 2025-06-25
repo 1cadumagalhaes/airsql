@@ -22,6 +22,7 @@ from airsql.operators import (
     SQLMergeOperator,
     SQLQueryOperator,
     SQLReplaceOperator,
+    SQLTruncateOperator,
 )
 from airsql.table import Table
 
@@ -238,6 +239,7 @@ class SQLDecorators:
         output_table: Table,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
+        method: str = 'replace',
         **template_vars,
     ) -> Callable:
         """
@@ -245,6 +247,57 @@ class SQLDecorators:
 
         Args:
             output_table: Table to replace content in
+            source_conn: Connection ID for the source database
+            sql_file: Path to SQL file (relative to sql_files_path)
+            method: Replace method - 'replace' (default) or 'truncate'
+            **template_vars: Variables to pass to Jinja template
+        """
+
+        def decorator(func: Callable) -> Callable:
+            @wraps(func)
+            def wrapper(*args, **kwargs) -> None:
+                sql_query = self._process_sql_input(
+                    func, args, kwargs, sql_file, **template_vars
+                )
+
+                op_kwargs = {'outlets': [output_table.as_asset()]}
+
+                if method == 'truncate':
+                    operator = SQLTruncateOperator(
+                        task_id=func.__name__,
+                        sql=sql_query,
+                        output_table=output_table,
+                        source_conn=source_conn,
+                        **op_kwargs,
+                    )
+                else:
+                    operator = SQLReplaceOperator(
+                        task_id=func.__name__,
+                        sql=sql_query,
+                        output_table=output_table,
+                        source_conn=source_conn,
+                        **op_kwargs,
+                    )
+
+                return operator
+
+            return wrapper
+
+        return decorator
+
+    def truncate(
+        self,
+        output_table: Table,
+        source_conn: Optional[str] = None,
+        sql_file: Optional[str] = None,
+        **template_vars,
+    ) -> Callable:
+        """
+        Decorator for SQL operations that truncate table content and insert new data,
+        preserving table structure and resetting sequences.
+
+        Args:
+            output_table: Table to truncate and reload
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
             **template_vars: Variables to pass to Jinja template
@@ -259,7 +312,7 @@ class SQLDecorators:
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
 
-                operator = SQLReplaceOperator(
+                operator = SQLTruncateOperator(
                     task_id=func.__name__,
                     sql=sql_query,
                     output_table=output_table,
@@ -280,6 +333,7 @@ class SQLDecorators:
         update_columns: Optional[List[str]] = None,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
+        pre_truncate: bool = False,
         **template_vars,
     ) -> Callable:
         """
@@ -291,6 +345,7 @@ class SQLDecorators:
             update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
+            pre_truncate: If True, truncate the table before performing the merge
             **template_vars: Variables to pass to Jinja template
         """
 
@@ -310,6 +365,7 @@ class SQLDecorators:
                     conflict_columns=conflict_columns,
                     update_columns=update_columns,
                     source_conn=source_conn,
+                    pre_truncate=pre_truncate,
                     **op_kwargs,
                 )
 
@@ -333,7 +389,7 @@ class SQLDecorators:
         Args:
             output_table: Table to write DataFrame to
             timestamp_column: Custom timestamp column name (optional)
-            if_exists: How to behave if table exists ('append', 'replace', 'fail')
+            if_exists: How to behave if table exists ('append', 'replace', 'truncate', 'fail')
             dataframe: Pre-existing DataFrame to load (optional)
 
         Example 1 - Function that returns DataFrame:

@@ -103,6 +103,36 @@ class SQLReplaceOperator(BaseSQLOperator):
         return str(self.output_table)
 
 
+class SQLTruncateOperator(BaseSQLOperator):
+    """Operator for SQL queries that truncate the destination table and insert new data, preserving structure."""
+
+    def __init__(
+        self, sql: str, output_table: Table, source_conn: Optional[str] = None, **kwargs
+    ):
+        super().__init__(sql=sql, source_conn=source_conn, **kwargs)
+        self.output_table = output_table
+
+    def execute(self, context: Context) -> str:
+        """Execute the SQL query and truncate/reload the output table."""
+        self.log.info(f'Executing SQL query to truncate and reload {self.output_table}')
+        self.log.debug(f'SQL Query: {self.sql}')
+
+        if self.source_conn:
+            hook = self.hook_manager.get_hook(self.source_conn)
+            if isinstance(hook, BigQueryHook):
+                df = hook.get_pandas_df(self.sql, dialect='standard')
+            else:
+                df = hook.get_pandas_df(self.sql)
+            self.log.info(
+                f'Query returned {len(df)} rows, truncating and reloading table'
+            )
+            self.hook_manager.truncate_table_content(df, self.output_table)
+        else:
+            raise NotImplementedError('Cross-database queries not yet implemented')
+
+        return str(self.output_table)
+
+
 class SQLMergeOperator(BaseSQLOperator):
     """Operator for SQL queries that merge/upsert into the destination table."""
 
@@ -113,12 +143,14 @@ class SQLMergeOperator(BaseSQLOperator):
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
         source_conn: Optional[str] = None,
+        pre_truncate: bool = False,
         **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
         self.conflict_columns = conflict_columns
         self.update_columns = update_columns
+        self.pre_truncate = pre_truncate
 
     def execute(self, context: Context) -> Any:
         """Execute the SQL query and merge into the output table."""
@@ -126,6 +158,7 @@ class SQLMergeOperator(BaseSQLOperator):
         self.log.debug(f'SQL Query: {self.sql}')
         self.log.debug(f'Conflict columns: {self.conflict_columns}')
         self.log.debug(f'Update columns: {self.update_columns or "all columns"}')
+        self.log.debug(f'Pre-truncate: {self.pre_truncate}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
@@ -133,6 +166,13 @@ class SQLMergeOperator(BaseSQLOperator):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 df = hook.get_pandas_df(self.sql)
+
+            if self.pre_truncate:
+                self.log.info(f'Pre-truncating table {self.output_table} before merge')
+                # Create an empty DataFrame with the same structure for truncation
+                empty_df = df.iloc[0:0].copy()
+                self.hook_manager.truncate_table_content(empty_df, self.output_table)
+
             self.log.info(f'Query returned {len(df)} rows, merging into table')
             self.hook_manager.merge_dataframe_to_table(
                 df,
@@ -190,6 +230,7 @@ class DataFrameMergeOperator(BaseOperator):
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
+        pre_truncate: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -198,6 +239,7 @@ class DataFrameMergeOperator(BaseOperator):
         self.conflict_columns = conflict_columns
         self.update_columns = update_columns
         self.timestamp_column = timestamp_column
+        self.pre_truncate = pre_truncate
         self.hook_manager = SQLHookManager()
 
     def execute(self, context: Context) -> None:
@@ -208,6 +250,13 @@ class DataFrameMergeOperator(BaseOperator):
         self.log.debug(f'Conflict columns: {self.conflict_columns}')
         self.log.debug(f'Update columns: {self.update_columns or "all columns"}')
         self.log.debug(f'DataFrame columns: {list(self.dataframe.columns)}')
+        self.log.debug(f'Pre-truncate: {self.pre_truncate}')
+
+        if self.pre_truncate:
+            self.log.info(f'Pre-truncating table {self.output_table} before merge')
+            # Create an empty DataFrame with the same structure for truncation
+            empty_df = self.dataframe.iloc[0:0].copy()
+            self.hook_manager.truncate_table_content(empty_df, self.output_table)
 
         self.hook_manager.merge_dataframe_to_table(
             df=self.dataframe,
