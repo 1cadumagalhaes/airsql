@@ -97,7 +97,8 @@ class Table(BaseModel):
         """Check if the table uses a BigQuery connection."""
         try:
             conn = BaseHook.get_connection(self.conn_id)
-            return conn.conn_type.lower() == 'bigquery'
+            conn_type = conn.conn_type.lower() if conn.conn_type else 'unknown'
+            return conn_type in {'google_cloud_platform', 'gccpigquery', 'bigquery'}
         except Exception as e:
             logging.getLogger(__name__).warning(
                 f'Failed to check connection type for {self.conn_id}: {e}'
