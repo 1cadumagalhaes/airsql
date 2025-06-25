@@ -321,16 +321,19 @@ class SQLDecorators:
         output_table: Table,
         timestamp_column: Optional[str] = None,
         if_exists: str = 'append',
+        dataframe: Optional[pd.DataFrame] = None,
     ) -> Callable:
         """
-        Decorator for functions that return a DataFrame to be loaded into a table.
+        Decorator for functions that return a DataFrame to be loaded into a table,
+        or for directly loading a provided DataFrame.
 
         Args:
             output_table: Table to write DataFrame to
             timestamp_column: Custom timestamp column name (optional)
             if_exists: How to behave if table exists ('append', 'replace', 'fail')
+            dataframe: Pre-existing DataFrame to load (optional)
 
-        Example:
+        Example 1 - Function that returns DataFrame:
             @sql.load_dataframe(
                 output_table=Table(
                     conn_id="postgres_conn",
@@ -344,16 +347,33 @@ class SQLDecorators:
                     'user_id': [1, 2, 3],
                     'name': ['Alice', 'Bob', 'Charlie']
                 })
+
+        Example 2 - Direct DataFrame loading:
+            @sql.load_dataframe(
+                output_table=Table(
+                    conn_id="postgres_conn",
+                    table_name="analytics.users"
+                ),
+                if_exists='replace',
+                dataframe=my_existing_df
+            )
+            def load_existing_data():
+                pass  # Function body can be empty when dataframe is provided
         """
 
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
-                df = func(*args, **kwargs)
+                # Use provided dataframe or get it from function
+                if dataframe is not None:
+                    df = dataframe
+                else:
+                    df = func(*args, **kwargs)
 
                 if not isinstance(df, pd.DataFrame):
                     raise ValueError(
-                        f'Function {func.__name__} must return a pandas DataFrame'
+                        f'Function {func.__name__} must return a pandas DataFrame '
+                        'or a DataFrame must be provided to the decorator'
                     )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
@@ -378,17 +398,19 @@ class SQLDecorators:
         output_table: Table,
         conflict_columns: List[str],
         timestamp_column: Optional[str] = None,
+        dataframe: Optional[pd.DataFrame] = None,
     ) -> Callable:
         """
         Decorator for functions that return a DataFrame to be merged/upserted
-        into a table.
+        into a table, or for directly merging a provided DataFrame.
 
         Args:
             output_table: Table to merge DataFrame into
             conflict_columns: Columns to use for conflict resolution
             timestamp_column: Custom timestamp column name (optional)
+            dataframe: Pre-existing DataFrame to merge (optional)
 
-        Example:
+        Example 1 - Function that returns DataFrame:
             @sql.merge_dataframe(
                 output_table=Table(
                     conn_id="bigquery_conn",
@@ -403,16 +425,33 @@ class SQLDecorators:
                     'event_date': ['2025-05-29', '2025-05-29'],
                     'event_count': [10, 15]
                 })
+
+        Example 2 - Direct DataFrame merging:
+            @sql.merge_dataframe(
+                output_table=Table(
+                    conn_id="bigquery_conn",
+                    table_name="analytics.user_events"
+                ),
+                conflict_columns=['user_id', 'event_date'],
+                dataframe=my_existing_df
+            )
+            def merge_existing_data():
+                pass  # Function body can be empty when dataframe is provided
         """
 
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
-                df = func(*args, **kwargs)
+                # Use provided dataframe or get it from function
+                if dataframe is not None:
+                    df = dataframe
+                else:
+                    df = func(*args, **kwargs)
 
                 if not isinstance(df, pd.DataFrame):
                     raise ValueError(
-                        f'Function {func.__name__} must return a pandas DataFrame'
+                        f'Function {func.__name__} must return a pandas DataFrame '
+                        'or a DataFrame must be provided to the decorator'
                     )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
