@@ -567,5 +567,162 @@ class SQLDecorators:
 
         return decorator
 
+    def extract_and_merge(
+        self,
+        output_table: Table,
+        conflict_columns: List[str],
+        source_conn: Optional[str] = None,
+        timestamp_column: Optional[str] = None,
+        sql_file: Optional[str] = None,
+        **template_vars,
+    ) -> Callable:
+        """
+        TaskFlow-compatible decorator that extracts data via SQL and merges it into a table.
+
+        Combines SQL extraction and DataFrame merge operations in a single task.
+        The decorated function should return SQL that extracts the data to be merged.
+
+        Args:
+            output_table: Table to merge extracted data into
+            conflict_columns: Columns to use for conflict resolution
+            source_conn: Connection ID for the source database
+            timestamp_column: Custom timestamp column name (optional)
+            sql_file: Path to SQL file (relative to sql_files_path)
+            **template_vars: Variables to pass to Jinja template
+
+        Example:
+            @sql.extract_and_merge(
+                output_table=Table(
+                    conn_id="bigquery_conn",
+                    table_name="analytics.user_events"
+                ),
+                conflict_columns=['user_id', 'event_date'],
+                source_conn="postgres_conn"
+            )
+            def extract_user_events():
+                return '''
+                    SELECT user_id, event_date, COUNT(*) as event_count
+                    FROM raw_events
+                    WHERE event_date = '{{ ds }}'
+                    GROUP BY user_id, event_date
+                '''
+        """
+
+        def decorator(func: Callable) -> Callable:
+            @task(task_id=func.__name__)
+            @wraps(func)
+            def wrapper(*args, **kwargs) -> str:
+                # First, extract the data using SQL
+                sql_query = self._process_sql_input(
+                    func, args, kwargs, sql_file, **template_vars
+                )
+
+                # Get DataFrame from SQL query
+                dataframe_operator = SQLDataFrameOperator(
+                    task_id=f'{func.__name__}_extract',
+                    sql=sql_query,
+                    source_conn=source_conn,
+                )
+
+                context = get_current_context()
+                df = dataframe_operator.execute(context)
+
+                # Merge the DataFrame into the target table
+                merge_operator = DataFrameMergeOperator(
+                    task_id=f'{func.__name__}_merge',
+                    dataframe=df,
+                    output_table=output_table,
+                    conflict_columns=conflict_columns,
+                    timestamp_column=timestamp_column,
+                    outlets=[output_table.as_asset()],
+                )
+
+                merge_operator.execute(context)
+                return f'Extracted and merged {len(df)} rows into {output_table.table_name}'
+
+            return wrapper
+
+        return decorator
+
+    def extract_and_load(
+        self,
+        output_table: Table,
+        source_conn: Optional[str] = None,
+        timestamp_column: Optional[str] = None,
+        if_exists: str = 'append',
+        sql_file: Optional[str] = None,
+        **template_vars,
+    ) -> Callable:
+        """
+        TaskFlow-compatible decorator that extracts data via SQL and loads it into a table.
+
+        Combines SQL extraction and DataFrame load operations in a single task.
+        The decorated function should return SQL that extracts the data to be loaded.
+
+        Args:
+            output_table: Table to load extracted data into
+            source_conn: Connection ID for the source database
+            timestamp_column: Custom timestamp column name (optional)
+            if_exists: How to behave if table exists ('append', 'replace', 'fail')
+            sql_file: Path to SQL file (relative to sql_files_path)
+            **template_vars: Variables to pass to Jinja template
+
+        Example:
+            @sql.extract_and_load(
+                output_table=Table(
+                    conn_id="postgres_conn",
+                    table_name="analytics.daily_summary"
+                ),
+                source_conn="bigquery_conn",
+                if_exists='replace'
+            )
+            def extract_daily_summary():
+                return '''
+                    SELECT
+                        DATE(created_at) as summary_date,
+                        COUNT(*) as total_records,
+                        AVG(amount) as avg_amount
+                    FROM transactions
+                    WHERE DATE(created_at) = '{{ ds }}'
+                    GROUP BY DATE(created_at)
+                '''
+        """
+
+        def decorator(func: Callable) -> Callable:
+            @task(task_id=func.__name__)
+            @wraps(func)
+            def wrapper(*args, **kwargs) -> str:
+                # First, extract the data using SQL
+                sql_query = self._process_sql_input(
+                    func, args, kwargs, sql_file, **template_vars
+                )
+
+                # Get DataFrame from SQL query
+                dataframe_operator = SQLDataFrameOperator(
+                    task_id=f'{func.__name__}_extract',
+                    sql=sql_query,
+                    source_conn=source_conn,
+                )
+
+                context = get_current_context()
+                df = dataframe_operator.execute(context)
+
+                # Load the DataFrame into the target table
+                load_operator = DataFrameLoadOperator(
+                    task_id=f'{func.__name__}_load',
+                    dataframe=df,
+                    output_table=output_table,
+                    timestamp_column=timestamp_column,
+                    if_exists=if_exists,
+                    outlets=[output_table.as_asset()],
+                )
+
+                load_operator.execute(context)
+                return f'Extracted and loaded {len(df)} rows into {output_table.table_name}'
+
+            return wrapper
+
+        return decorator
+
 
 sql = SQLDecorators()
