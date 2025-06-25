@@ -9,6 +9,7 @@ from airflow.hooks.base import BaseHook
 from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import get_current_context
+from google.cloud import bigquery
 from psycopg2 import sql as psycopg2_sql
 from psycopg2.extras import execute_values
 
@@ -185,24 +186,30 @@ class SQLHookManager:
             project_id = table.project or hook.project_id
         else:
             raise ValueError(f'Invalid BigQuery table name: {table.table_name}')
-        destination_table = f'{project_id}.{dataset_id}.{table_id}'
-        job_config = {
-            'write_disposition': 'WRITE_APPEND',
-            'create_disposition': 'CREATE_IF_NEEDED',
-        }
-        if table.partition_by:
-            job_config['time_partitioning'] = {'field': table.partition_by}
-        if table.cluster_by:
-            job_config['clustering'] = {'fields': table.cluster_by}
 
-        hook.load_dataframe(
-            dataframe=df,
-            destination_project_dataset_table=destination_table,
-            table_schema=table.schema_fields,
-            location=table.location,
-            write_disposition='WRITE_APPEND',  # Explicitly set, though often default
-            create_disposition='CREATE_IF_NEEDED',
+        client = hook.get_client(project_id=project_id, location=table.location)
+        destination_table_ref = client.dataset(dataset_id).table(table_id)
+
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
         )
+        if table.partition_by:
+            job_config.time_partitioning = bigquery.TimePartitioning(
+                field=table.partition_by
+            )
+        if table.cluster_by:
+            job_config.clustering_fields = table.cluster_by
+        if table.schema_fields:
+            job_config.schema = [
+                bigquery.SchemaField(field['name'], field['type'])
+                for field in table.schema_fields
+            ]
+
+        job = client.load_table_from_dataframe(
+            df, destination_table_ref, job_config=job_config, location=table.location
+        )
+        job.result()  # Wait for the job to complete
 
     @staticmethod
     def _write_to_postgres(df: pd.DataFrame, table: Table) -> None:
@@ -233,27 +240,30 @@ class SQLHookManager:
             project_id = table.project or hook.project_id
         else:
             raise ValueError(f'Invalid BigQuery table name: {table.table_name}')
-        table_id_full = f'{project_id}.{dataset_id}.{table_id}'
-        job_config = {
-            'write_disposition': 'WRITE_TRUNCATE',
-            'create_disposition': 'CREATE_IF_NEEDED',
-        }
-        if table.partition_by:
-            job_config['time_partitioning'] = {'field': table.partition_by}
 
-        if table.cluster_by:
-            job_config['clustering'] = {'fields': table.cluster_by}
+        client = hook.get_client(project_id=project_id, location=table.location)
+        destination_table_ref = client.dataset(dataset_id).table(table_id)
 
-        if table.location:
-            job_config['job_location'] = table.location
-        hook.load_dataframe(
-            dataframe=df,
-            destination_project_dataset_table=table_id_full,
-            table_schema=table.schema_fields,
-            location=table.location,
-            write_disposition='WRITE_TRUNCATE',
-            create_disposition='CREATE_IF_NEEDED',
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
         )
+        if table.partition_by:
+            job_config.time_partitioning = bigquery.TimePartitioning(
+                field=table.partition_by
+            )
+        if table.cluster_by:
+            job_config.clustering_fields = table.cluster_by
+        if table.schema_fields:
+            job_config.schema = [
+                bigquery.SchemaField(field['name'], field['type'])
+                for field in table.schema_fields
+            ]
+
+        job = client.load_table_from_dataframe(
+            df, destination_table_ref, job_config=job_config, location=table.location
+        )
+        job.result()  # Wait for the job to complete
 
     @staticmethod
     def _replace_postgres_table(df: pd.DataFrame, table: Table) -> None:
@@ -288,15 +298,21 @@ class SQLHookManager:
         else:
             raise ValueError(f'Invalid BigQuery table name: {table.table_name}')
         temp_table_id = f'{table_id}_temp_{int(pd.Timestamp.now().timestamp())}'
-        temp_table_full = f'{project_id}.{dataset_id}.{temp_table_id}'
+
+        client = hook.get_client(project_id=project_id, location=table.location)
+        temp_table_ref = client.dataset(dataset_id).table(temp_table_id)
 
         try:
-            hook.load_dataframe(
-                dataframe=df,
-                destination_project_dataset_table=temp_table_full,
-                location=table.location,
-                write_disposition='WRITE_TRUNCATE',  # Ensure temp table is fresh
+            # Load DataFrame to temporary table
+            job_config = bigquery.LoadJobConfig(
+                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+                create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
             )
+            job = client.load_table_from_dataframe(
+                df, temp_table_ref, job_config=job_config, location=table.location
+            )
+            job.result()  # Wait for the job to complete
+            temp_table_full = f'{project_id}.{dataset_id}.{temp_table_id}'
             all_columns = df.columns.tolist()
             update_columns = [col for col in all_columns if col not in conflict_columns]
             merge_sql = f"""
@@ -317,6 +333,7 @@ WHEN NOT MATCHED THEN
 
         finally:
             try:
+                temp_table_full = f'{project_id}.{dataset_id}.{temp_table_id}'
                 hook.delete_table(
                     project_id=project_id,
                     dataset_id=dataset_id,
