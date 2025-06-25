@@ -277,6 +277,7 @@ class SQLDecorators:
         self,
         output_table: Table,
         conflict_columns: List[str],
+        update_columns: Optional[List[str]] = None,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         **template_vars,
@@ -286,7 +287,8 @@ class SQLDecorators:
 
         Args:
             output_table: Table to merge data into
-            conflict_columns: Columns to use for conflict resolution
+            conflict_columns: Columns to use for conflict resolution (ON clause)
+            update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
             **template_vars: Variables to pass to Jinja template
@@ -306,6 +308,7 @@ class SQLDecorators:
                     sql=sql_query,
                     output_table=output_table,
                     conflict_columns=conflict_columns,
+                    update_columns=update_columns,
                     source_conn=source_conn,
                     **op_kwargs,
                 )
@@ -397,6 +400,7 @@ class SQLDecorators:
     def merge_dataframe(
         output_table: Table,
         conflict_columns: List[str],
+        update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
         dataframe: Optional[pd.DataFrame] = None,
     ) -> Callable:
@@ -406,7 +410,8 @@ class SQLDecorators:
 
         Args:
             output_table: Table to merge DataFrame into
-            conflict_columns: Columns to use for conflict resolution
+            conflict_columns: Columns to use for conflict resolution (ON clause)
+            update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
             timestamp_column: Custom timestamp column name (optional)
             dataframe: Pre-existing DataFrame to merge (optional)
 
@@ -416,14 +421,16 @@ class SQLDecorators:
                     conn_id="bigquery_conn",
                     table_name="analytics.user_events"
                 ),
-                conflict_columns=['user_id', 'event_date']
+                conflict_columns=['user_id', 'event_date'],
+                update_columns=['event_count', 'last_updated']  # Only update these columns
             )
             def update_user_events():
                 # Your DataFrame creation logic
                 return pd.DataFrame({
                     'user_id': [1, 2],
                     'event_date': ['2025-05-29', '2025-05-29'],
-                    'event_count': [10, 15]
+                    'event_count': [10, 15],
+                    'last_updated': [datetime.now(), datetime.now()]
                 })
 
         Example 2 - Direct DataFrame merging:
@@ -461,6 +468,7 @@ class SQLDecorators:
                     dataframe=df,
                     output_table=output_table,
                     conflict_columns=conflict_columns,
+                    update_columns=update_columns,
                     timestamp_column=timestamp_column,
                     **op_kwargs,
                 )
@@ -571,6 +579,7 @@ class SQLDecorators:
         self,
         output_table: Table,
         conflict_columns: List[str],
+        update_columns: Optional[List[str]] = None,
         source_conn: Optional[str] = None,
         timestamp_column: Optional[str] = None,
         sql_file: Optional[str] = None,
@@ -584,7 +593,8 @@ class SQLDecorators:
 
         Args:
             output_table: Table to merge extracted data into
-            conflict_columns: Columns to use for conflict resolution
+            conflict_columns: Columns to use for conflict resolution (ON clause)
+            update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
             source_conn: Connection ID for the source database
             timestamp_column: Custom timestamp column name (optional)
             sql_file: Path to SQL file (relative to sql_files_path)
@@ -597,11 +607,12 @@ class SQLDecorators:
                     table_name="analytics.user_events"
                 ),
                 conflict_columns=['user_id', 'event_date'],
+                update_columns=['event_count', 'last_updated'],  # Only update these columns
                 source_conn="postgres_conn"
             )
             def extract_user_events():
                 return '''
-                    SELECT user_id, event_date, COUNT(*) as event_count
+                    SELECT user_id, event_date, COUNT(*) as event_count, NOW() as last_updated
                     FROM raw_events
                     WHERE event_date = '{{ ds }}'
                     GROUP BY user_id, event_date
@@ -633,6 +644,7 @@ class SQLDecorators:
                     dataframe=df,
                     output_table=output_table,
                     conflict_columns=conflict_columns,
+                    update_columns=update_columns,
                     timestamp_column=timestamp_column,
                     outlets=[output_table.as_asset()],
                 )

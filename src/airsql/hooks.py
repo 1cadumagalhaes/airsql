@@ -2,6 +2,7 @@
 Hook manager for handling different database connections and operations.
 """
 
+import logging
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
@@ -96,15 +97,24 @@ class SQLHookManager:
             return df
 
     def write_dataframe_to_table(
-        self, df: pd.DataFrame, table: Table, timestamp_column: Optional[str] = None
+        self,
+        df: pd.DataFrame,
+        table: Table,
+        if_exists: str = 'append',
+        timestamp_column: Optional[str] = None,
     ) -> None:
         """Write a DataFrame to a table with automatic timestamp handling."""
+        logger = logging.getLogger(__name__)
+        logger.info(f'Writing DataFrame with {len(df)} rows to {table.table_name}')
+        logger.debug(f'DataFrame columns: {list(df.columns)}')
+        logger.debug(f'If exists strategy: {if_exists}')
+
         df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
 
         if table.is_bigquery:
-            self._write_to_bigquery(df_with_timestamps, table)
+            self._write_to_bigquery(df_with_timestamps, table, if_exists)
         elif table.is_postgres:
-            self._write_to_postgres(df_with_timestamps, table)
+            self._write_to_postgres(df_with_timestamps, table, if_exists)
         else:
             raise ValueError(f'Unsupported database type for table: {table}')
 
@@ -126,15 +136,26 @@ class SQLHookManager:
         df: pd.DataFrame,
         table: Table,
         conflict_columns: List[str],
+        update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
     ) -> None:
         """Merge/upsert DataFrame data into a table."""
+        logger = logging.getLogger(__name__)
+        logger.info(f'Merging DataFrame with {len(df)} rows into {table.table_name}')
+        logger.debug(f'Conflict columns: {conflict_columns}')
+        logger.debug(f'Update columns: {update_columns or "all columns"}')
+        logger.debug(f'DataFrame columns: {list(df.columns)}')
+
         df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
 
         if table.is_bigquery:
-            self._merge_bigquery_table(df_with_timestamps, table, conflict_columns)
+            self._merge_bigquery_table(
+                df_with_timestamps, table, conflict_columns, update_columns
+            )
         elif table.is_postgres:
-            self._merge_postgres_table(df_with_timestamps, table, conflict_columns)
+            self._merge_postgres_table(
+                df_with_timestamps, table, conflict_columns, update_columns
+            )
         else:
             raise ValueError(f'Unsupported database type for table: {table}')
 
@@ -177,7 +198,9 @@ class SQLHookManager:
         ]
 
     @staticmethod
-    def _write_to_bigquery(df: pd.DataFrame, table: Table) -> None:
+    def _write_to_bigquery(
+        df: pd.DataFrame, table: Table, if_exists: str = 'append'
+    ) -> None:
         """Write DataFrame to BigQuery table."""
         hook = BigQueryHook(gcp_conn_id=table.conn_id)
         parts = table.table_name.split('.')
@@ -190,8 +213,18 @@ class SQLHookManager:
         client = hook.get_client(project_id=project_id, location=table.location)
         destination_table_ref = client.dataset(dataset_id).table(table_id)
 
+        # Map if_exists to BigQuery write disposition
+        write_disposition_map = {
+            'append': bigquery.WriteDisposition.WRITE_APPEND,
+            'replace': bigquery.WriteDisposition.WRITE_TRUNCATE,
+            'fail': bigquery.WriteDisposition.WRITE_EMPTY,
+        }
+        write_disposition = write_disposition_map.get(
+            if_exists, bigquery.WriteDisposition.WRITE_APPEND
+        )
+
         job_config = bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            write_disposition=write_disposition,
             create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
         )
         if table.partition_by:
@@ -212,7 +245,9 @@ class SQLHookManager:
         job.result()  # Wait for the job to complete
 
     @staticmethod
-    def _write_to_postgres(df: pd.DataFrame, table: Table) -> None:
+    def _write_to_postgres(
+        df: pd.DataFrame, table: Table, if_exists: str = 'append'
+    ) -> None:
         """Write DataFrame to Postgres table."""
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         engine = hook.get_sqlalchemy_engine()
@@ -225,7 +260,7 @@ class SQLHookManager:
             table_name,
             engine,
             schema=schema_name,
-            if_exists='append',
+            if_exists=if_exists,
             index=False,
             method='multi',
         )
@@ -287,7 +322,10 @@ class SQLHookManager:
 
     @staticmethod
     def _merge_bigquery_table(
-        df: pd.DataFrame, table: Table, conflict_columns: List[str]
+        df: pd.DataFrame,
+        table: Table,
+        conflict_columns: List[str],
+        update_columns: Optional[List[str]] = None,
     ) -> None:
         """Merge DataFrame into BigQuery table using MERGE statement."""
         hook = BigQueryHook(gcp_conn_id=table.conn_id)
@@ -314,13 +352,27 @@ class SQLHookManager:
             job.result()  # Wait for the job to complete
             temp_table_full = f'{project_id}.{dataset_id}.{temp_table_id}'
             all_columns = df.columns.tolist()
-            update_columns = [col for col in all_columns if col not in conflict_columns]
+
+            # Use provided update_columns or default to all columns except conflict columns
+            if update_columns is None:
+                columns_to_update = [
+                    col for col in all_columns if col not in conflict_columns
+                ]
+            else:
+                # Validate that update_columns are in the DataFrame
+                missing_cols = [col for col in update_columns if col not in all_columns]
+                if missing_cols:
+                    raise ValueError(
+                        f'Update columns not found in DataFrame: {missing_cols}'
+                    )
+                columns_to_update = update_columns
+
             merge_sql = f"""
 MERGE `{project_id}.{dataset_id}.{table_id}` AS target
 USING `{temp_table_full}` AS source
 ON {' AND '.join([f'target.{col} = source.{col}' for col in conflict_columns])}
 WHEN MATCHED THEN
-  UPDATE SET {', '.join([f'{col} = source.{col}' for col in update_columns])}
+  UPDATE SET {', '.join([f'{col} = source.{col}' for col in columns_to_update])}
 WHEN NOT MATCHED THEN
   INSERT ({', '.join(all_columns)})
   VALUES ({', '.join([f'source.{col}' for col in all_columns])})
@@ -343,7 +395,11 @@ WHEN NOT MATCHED THEN
                 print(f'Warning: Failed to cleanup temp table {temp_table_full}: {e}')
 
     def _merge_postgres_table(  # noqa: PLR0914
-        self, df: pd.DataFrame, table: Table, conflict_columns: List[str]
+        self,
+        df: pd.DataFrame,
+        table: Table,
+        conflict_columns: List[str],
+        update_columns: Optional[List[str]] = None,
     ) -> None:
         """Merge DataFrame into Postgres table using ON CONFLICT."""
         hook = PostgresHook(postgres_conn_id=table.conn_id)
@@ -362,12 +418,35 @@ WHEN NOT MATCHED THEN
                 schema_name, table_name = 'public', table.table_name
                 table_identifier = psycopg2_sql.Identifier(table_name)
 
-            audit_columns = {'created_at', 'updated_at', 'criado_em', 'atualizado_em'}
-            update_cols = [
-                col
-                for col in common_columns
-                if col not in conflict_columns and col not in audit_columns
-            ]
+            # Determine which columns to update
+            if update_columns is None:
+                # Default behavior: update all columns except conflict columns and audit columns
+                audit_columns = {
+                    'created_at',
+                    'updated_at',
+                    'criado_em',
+                    'atualizado_em',
+                }
+                update_cols = [
+                    col
+                    for col in common_columns
+                    if col not in conflict_columns and col not in audit_columns
+                ]
+            else:
+                # Use provided update_columns, validate they exist in DataFrame and table
+                missing_in_df = [col for col in update_columns if col not in df.columns]
+                missing_in_table = [
+                    col for col in update_columns if col not in common_columns
+                ]
+                if missing_in_df:
+                    raise ValueError(
+                        f'Update columns not found in DataFrame: {missing_in_df}'
+                    )
+                if missing_in_table:
+                    raise ValueError(
+                        f'Update columns not found in table: {missing_in_table}'
+                    )
+                update_cols = update_columns
             data_tuples = [tuple(x) for x in df_filtered[common_columns].to_numpy()]
 
             insert_sql = psycopg2_sql.SQL(

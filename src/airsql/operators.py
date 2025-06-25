@@ -38,12 +38,14 @@ class SQLQueryOperator(BaseSQLOperator):
     def execute(self, context: Context) -> str:
         """Execute the SQL query and write to the output table."""
         self.log.info(f'Executing SQL query to write to {self.output_table}')
+        self.log.debug(f'SQL Query: {self.sql}')
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 df = hook.get_pandas_df(self.sql)
+            self.log.info(f'Query returned {len(df)} rows')
             self.hook_manager.write_dataframe_to_table(df, self.output_table)
         else:
             raise NotImplementedError('Cross-database queries not yet implemented')
@@ -57,12 +59,18 @@ class SQLDataFrameOperator(BaseSQLOperator):
     def execute(self, context: Context) -> pd.DataFrame:
         """Execute the SQL query and return a DataFrame."""
         self.log.info('Executing SQL query to return DataFrame')
+        self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
             if isinstance(hook, BigQueryHook):
-                return hook.get_pandas_df(self.sql, dialect='standard')
-            return hook.get_pandas_df(self.sql)
+                df = hook.get_pandas_df(self.sql, dialect='standard')
+            else:
+                df = hook.get_pandas_df(self.sql)
+            self.log.info(
+                f'Query returned DataFrame with {len(df)} rows and {len(df.columns)} columns'
+            )
+            return df
         else:
             raise NotImplementedError('Cross-database queries not yet implemented')
 
@@ -79,6 +87,7 @@ class SQLReplaceOperator(BaseSQLOperator):
     def execute(self, context: Context) -> str:
         """Execute the SQL query and replace the output table."""
         self.log.info(f'Executing SQL query to replace {self.output_table}')
+        self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
@@ -86,6 +95,7 @@ class SQLReplaceOperator(BaseSQLOperator):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 df = hook.get_pandas_df(self.sql)
+            self.log.info(f'Query returned {len(df)} rows, replacing table content')
             self.hook_manager.replace_table_content(df, self.output_table)
         else:
             raise NotImplementedError('Cross-database queries not yet implemented')
@@ -101,16 +111,21 @@ class SQLMergeOperator(BaseSQLOperator):
         sql: str,
         output_table: Table,
         conflict_columns: List[str],
+        update_columns: Optional[List[str]] = None,
         source_conn: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
         self.conflict_columns = conflict_columns
+        self.update_columns = update_columns
 
     def execute(self, context: Context) -> Any:
         """Execute the SQL query and merge into the output table."""
         self.log.info(f'Executing SQL query to merge into {self.output_table}')
+        self.log.debug(f'SQL Query: {self.sql}')
+        self.log.debug(f'Conflict columns: {self.conflict_columns}')
+        self.log.debug(f'Update columns: {self.update_columns or "all columns"}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
@@ -118,8 +133,12 @@ class SQLMergeOperator(BaseSQLOperator):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 df = hook.get_pandas_df(self.sql)
+            self.log.info(f'Query returned {len(df)} rows, merging into table')
             self.hook_manager.merge_dataframe_to_table(
-                df, self.output_table, self.conflict_columns
+                df,
+                self.output_table,
+                self.conflict_columns,
+                update_columns=self.update_columns,
             )
         else:
             raise NotImplementedError('Cross-database queries not yet implemented')
@@ -147,13 +166,17 @@ class DataFrameLoadOperator(BaseOperator):
 
     def execute(self, context: Context) -> None:
         """Execute the DataFrame load operation."""
-        self.log.info(f'Loading DataFrame to {self.output_table}')
+        self.log.info(
+            f'Loading DataFrame with {len(self.dataframe)} rows to {self.output_table}'
+        )
+        self.log.debug(f'DataFrame columns: {list(self.dataframe.columns)}')
+        self.log.debug(f'If exists strategy: {self.if_exists}')
 
         self.hook_manager.write_dataframe_to_table(
             df=self.dataframe,
             table=self.output_table,
             if_exists=self.if_exists,
-            add_timestamps=True,
+            timestamp_column=self.timestamp_column,
         )
 
 
@@ -165,6 +188,7 @@ class DataFrameMergeOperator(BaseOperator):
         dataframe: pd.DataFrame,
         output_table: Table,
         conflict_columns: List[str],
+        update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
         **kwargs,
     ):
@@ -172,18 +196,25 @@ class DataFrameMergeOperator(BaseOperator):
         self.dataframe = dataframe
         self.output_table = output_table
         self.conflict_columns = conflict_columns
+        self.update_columns = update_columns
         self.timestamp_column = timestamp_column
         self.hook_manager = SQLHookManager()
 
     def execute(self, context: Context) -> None:
         """Execute the DataFrame merge operation."""
-        self.log.info(f'Merging DataFrame into {self.output_table}')
+        self.log.info(
+            f'Merging DataFrame with {len(self.dataframe)} rows into {self.output_table}'
+        )
+        self.log.debug(f'Conflict columns: {self.conflict_columns}')
+        self.log.debug(f'Update columns: {self.update_columns or "all columns"}')
+        self.log.debug(f'DataFrame columns: {list(self.dataframe.columns)}')
 
         self.hook_manager.merge_dataframe_to_table(
             df=self.dataframe,
             table=self.output_table,
-            merge_keys=self.conflict_columns,
-            add_timestamps=True,
+            conflict_columns=self.conflict_columns,
+            update_columns=self.update_columns,
+            timestamp_column=self.timestamp_column,
         )
 
 
@@ -213,3 +244,13 @@ class SQLCheckOperator(BaseSQLCheckOperator):
             kwargs['retries'] = retries
 
         super().__init__(sql=sql, **kwargs)
+
+    def execute(self, context: Context) -> None:
+        """Execute the SQL check with debug logging."""
+        self.log.info('Executing SQL data quality check')
+        self.log.debug(f'SQL Query: {self.sql}')
+
+        # Call the parent's execute method
+        super().execute(context)
+
+        self.log.info('SQL check completed successfully')
