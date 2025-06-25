@@ -46,12 +46,41 @@ jobs:
         git tag v${{ github.event.inputs.version }}
         git push origin v${{ github.event.inputs.version }}
     
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get the latest tag before this one
+        PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v "v${{ github.event.inputs.version }}" | head -n 1)
+        
+        if [ -z "$PREVIOUS_TAG" ]; then
+          # If no previous tag, get all commits
+          CHANGELOG=$(git log --pretty=format:"* %s (%h)" --reverse)
+        else
+          # Get commits since the last tag
+          CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"* %s (%h)" --reverse)
+        fi
+        
+        # Save changelog to a file and environment variable
+        echo "$CHANGELOG" > changelog.txt
+        echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+        echo "$CHANGELOG" >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
+    
+    - name: Build package
+      run: |
+        uv build
+    
+    - name: Publish to PyPI
+      env:
+        UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        uv publish
+    
     - name: Create GitHub release
-      uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: v${{ github.event.inputs.version }}
-        release_name: Release v${{ github.event.inputs.version }}
-        draft: false
-        prerelease: false
+      run: |
+        gh release create v${{ github.event.inputs.version }} \
+          --title "Release v${{ github.event.inputs.version }}" \
+          --notes "${{ env.CHANGELOG }}" \
+          ./dist/*
