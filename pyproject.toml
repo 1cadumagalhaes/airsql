@@ -1,6 +1,6 @@
 [project]
 name = "airsql"
-version = "0.3.0"
+version = "0.3.1"
 description = "A decorator-based SQL execution framework for Airflow"
 readme = "README.md"
 license = { file = "LICENSE" }
