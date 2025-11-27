@@ -5,8 +5,7 @@ from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.google.cloud.transfers.bigquery_to_gcs import (
     BigQueryToGCSOperator,
 )
-from airflow.sdk import Asset
-from airflow.utils.context import Context
+from airflow.sdk import Asset, Context
 
 from airsql.sensors.bigquery import BigQuerySqlSensor
 from airsql.transfers.gcs_postgres import GCSToPostgresOperator

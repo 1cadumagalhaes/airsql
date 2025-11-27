@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 import pandas as pd
-from airflow.decorators import task
-from airflow.sdk import get_current_context
+from airflow.sdk import get_current_context, task
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from airsql.file import File

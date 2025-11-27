@@ -5,8 +5,8 @@ Table reference class for airsql framework.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from airflow.hooks.base import BaseHook
 from airflow.sdk import Asset, get_current_context
+from airflow.sdk.bases.hook import BaseHook
 from pydantic import BaseModel, Field
 
 

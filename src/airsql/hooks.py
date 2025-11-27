@@ -6,10 +6,10 @@ import logging
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
-from airflow.hooks.base import BaseHook
 from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import get_current_context
+from airflow.sdk.bases.hook import BaseHook
 from google.cloud import bigquery
 from psycopg2 import sql as psycopg2_sql
 from psycopg2.extras import execute_values
