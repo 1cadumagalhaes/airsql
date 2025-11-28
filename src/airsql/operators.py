@@ -44,9 +44,10 @@ class SQLQueryOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use SQLAlchemy engine for Postgres to avoid compatibility issues
+                # Use SQLAlchemy connection for pandas compatibility
                 engine = hook.get_sqlalchemy_engine()
-                df = pd.read_sql(self.sql, engine)
+                with engine.connect() as conn:
+                    df = pd.read_sql(self.sql, conn)
             self.log.info(f'Query returned {len(df)} rows')
             self.hook_manager.write_dataframe_to_table(df, self.output_table)
         else:
@@ -68,9 +69,10 @@ class SQLDataFrameOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use SQLAlchemy engine for Postgres to avoid compatibility issues
+                # Use SQLAlchemy connection for pandas compatibility
                 engine = hook.get_sqlalchemy_engine()
-                df = pd.read_sql(self.sql, engine)
+                with engine.connect() as conn:
+                    df = pd.read_sql(self.sql, conn)
             self.log.info(
                 f'Query returned DataFrame with {len(df)} rows and {len(df.columns)} columns'
             )
@@ -98,9 +100,10 @@ class SQLReplaceOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use SQLAlchemy engine for Postgres to avoid compatibility issues
+                # Use SQLAlchemy connection for pandas compatibility
                 engine = hook.get_sqlalchemy_engine()
-                df = pd.read_sql(self.sql, engine)
+                with engine.connect() as conn:
+                    df = pd.read_sql(self.sql, conn)
             self.log.info(f'Query returned {len(df)} rows, replacing table content')
             self.hook_manager.replace_table_content(df, self.output_table)
         else:
@@ -128,9 +131,10 @@ class SQLTruncateOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use SQLAlchemy engine for Postgres to avoid compatibility issues
+                # Use SQLAlchemy connection for pandas compatibility
                 engine = hook.get_sqlalchemy_engine()
-                df = pd.read_sql(self.sql, engine)
+                with engine.connect() as conn:
+                    df = pd.read_sql(self.sql, conn)
             self.log.info(
                 f'Query returned {len(df)} rows, truncating and reloading table'
             )
@@ -173,9 +177,10 @@ class SQLMergeOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use SQLAlchemy engine for Postgres to avoid compatibility issues
+                # Use SQLAlchemy connection for pandas compatibility
                 engine = hook.get_sqlalchemy_engine()
-                df = pd.read_sql(self.sql, engine)
+                with engine.connect() as conn:
+                    df = pd.read_sql(self.sql, conn)
 
             if self.pre_truncate:
                 self.log.info(f'Pre-truncating table {self.output_table} before merge')
