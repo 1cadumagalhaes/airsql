@@ -204,6 +204,7 @@ class SQLDecorators:
         output_table: Table,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
+        dry_run: bool = False,
         **template_vars,
     ) -> Callable:
         """
@@ -213,6 +214,7 @@ class SQLDecorators:
             output_table: Table to append data to
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
+            dry_run: If True, simulate the operation without writing data
             **template_vars: Variables to pass to Jinja template. Non-Jinja variables
                             are passed as kwargs to the operator for dynamic task naming.
         """
@@ -233,6 +235,7 @@ class SQLDecorators:
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
+                    dry_run=dry_run,
                     **op_kwargs,
                 )
 
@@ -287,6 +290,7 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         method: str = 'replace',
+        dry_run: bool = False,
         **template_vars,
     ) -> Callable:
         """
@@ -297,6 +301,7 @@ class SQLDecorators:
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
             method: Replace method - 'replace' (default) or 'truncate'
+            dry_run: If True, simulate the operation without writing data
             **template_vars: Variables to pass to Jinja template. Non-Jinja variables
                             are passed as kwargs to the operator for dynamic task naming.
         """
@@ -318,6 +323,7 @@ class SQLDecorators:
                         sql=sql_query,
                         output_table=output_table,
                         source_conn=source_conn,
+                        dry_run=dry_run,
                         **op_kwargs,
                     )
                 else:
@@ -326,6 +332,7 @@ class SQLDecorators:
                         sql=sql_query,
                         output_table=output_table,
                         source_conn=source_conn,
+                        dry_run=dry_run,
                         **op_kwargs,
                     )
 
@@ -340,6 +347,7 @@ class SQLDecorators:
         output_table: Table,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
+        dry_run: bool = False,
         **template_vars,
     ) -> Callable:
         """
@@ -350,6 +358,7 @@ class SQLDecorators:
             output_table: Table to truncate and reload
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
+            dry_run: If True, simulate the operation without writing data
             **template_vars: Variables to pass to Jinja template. Non-Jinja variables
                             are passed as kwargs to the operator for dynamic task naming.
         """
@@ -370,6 +379,7 @@ class SQLDecorators:
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
+                    dry_run=dry_run,
                     **op_kwargs,
                 )
 
@@ -387,6 +397,7 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         pre_truncate: bool = False,
+        dry_run: bool = False,
         **template_vars,
     ) -> Callable:
         """
@@ -399,6 +410,7 @@ class SQLDecorators:
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
             pre_truncate: If True, truncate the table before performing the merge
+            dry_run: If True, simulate the operation without writing data
             **template_vars: Variables to pass to Jinja template. Non-Jinja variables
                             are passed as kwargs to the operator for dynamic task naming.
         """
@@ -422,6 +434,7 @@ class SQLDecorators:
                     update_columns=update_columns,
                     source_conn=source_conn,
                     pre_truncate=pre_truncate,
+                    dry_run=dry_run,
                     **op_kwargs,
                 )
 
@@ -437,6 +450,7 @@ class SQLDecorators:
         timestamp_column: Optional[str] = None,
         if_exists: str = 'append',
         dataframe: Optional[pd.DataFrame] = None,
+        dry_run: bool = False,
         **extra_kwargs,
     ) -> Callable:
         """
@@ -448,6 +462,7 @@ class SQLDecorators:
             timestamp_column: Custom timestamp column name (optional)
             if_exists: How to behave if table exists ('append', 'replace', 'truncate', 'fail')
             dataframe: Pre-existing DataFrame to load (optional)
+            dry_run: If True, simulate the operation without writing data
             **extra_kwargs: Extra keyword arguments for dynamic task naming and mapping
 
         Example 1 - Function that returns DataFrame:
@@ -503,6 +518,7 @@ class SQLDecorators:
                     output_table=output_table,
                     timestamp_column=timestamp_column,
                     if_exists=if_exists,
+                    dry_run=dry_run,
                     **op_kwargs,
                 )
 
@@ -519,6 +535,7 @@ class SQLDecorators:
         update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
         dataframe: Optional[pd.DataFrame] = None,
+        dry_run: bool = False,
         **extra_kwargs,
     ) -> Callable:
         """
@@ -531,6 +548,7 @@ class SQLDecorators:
             update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
             timestamp_column: Custom timestamp column name (optional)
             dataframe: Pre-existing DataFrame to merge (optional)
+            dry_run: If True, simulate the operation without writing data
             **extra_kwargs: Extra keyword arguments for dynamic task naming and mapping
 
         Example 1 - Function that returns DataFrame:
@@ -590,6 +608,7 @@ class SQLDecorators:
                     conflict_columns=conflict_columns,
                     update_columns=update_columns,
                     timestamp_column=timestamp_column,
+                    dry_run=dry_run,
                     **op_kwargs,
                 )
 
@@ -703,6 +722,7 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         timestamp_column: Optional[str] = None,
         sql_file: Optional[str] = None,
+        dry_run: bool = False,
         **template_vars,
     ) -> Callable:
         """
@@ -718,6 +738,7 @@ class SQLDecorators:
             source_conn: Connection ID for the source database
             timestamp_column: Custom timestamp column name (optional)
             sql_file: Path to SQL file (relative to sql_files_path)
+            dry_run: If True, simulate the operation without writing data
             **template_vars: Variables to pass to Jinja template
 
         Example:
@@ -766,6 +787,7 @@ class SQLDecorators:
                     conflict_columns=conflict_columns,
                     update_columns=update_columns,
                     timestamp_column=timestamp_column,
+                    dry_run=dry_run,
                     outlets=[output_table.as_asset()],
                 )
 
@@ -783,6 +805,7 @@ class SQLDecorators:
         timestamp_column: Optional[str] = None,
         if_exists: str = 'append',
         sql_file: Optional[str] = None,
+        dry_run: bool = False,
         **template_vars,
     ) -> Callable:
         """
@@ -797,6 +820,7 @@ class SQLDecorators:
             timestamp_column: Custom timestamp column name (optional)
             if_exists: How to behave if table exists ('append', 'replace', 'fail')
             sql_file: Path to SQL file (relative to sql_files_path)
+            dry_run: If True, simulate the operation without writing data
             **template_vars: Variables to pass to Jinja template
 
         Example:
@@ -846,6 +870,7 @@ class SQLDecorators:
                     output_table=output_table,
                     timestamp_column=timestamp_column,
                     if_exists=if_exists,
+                    dry_run=dry_run,
                     outlets=[output_table.as_asset()],
                 )
 
