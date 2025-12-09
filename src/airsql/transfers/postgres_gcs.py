@@ -26,7 +26,7 @@ class PostgresToGCSOperator(BaseOperator):
     :param gcp_conn_id: (Optional) The connection ID used to connect to Google Cloud.
     :type gcp_conn_id: str
     :param export_format: (Optional) The format to export the data to.
-        Supported formats are 'csv' and 'parquet'. Default is 'csv'.
+        Supported formats are 'csv' and 'parquet'. Default is 'parquet'.
     :type export_format: str
     :param schema_filename: (Optional) If set, a GCS file with the schema
         will be uploaded.
@@ -57,7 +57,7 @@ class PostgresToGCSOperator(BaseOperator):
         bucket: str,
         filename: str,
         gcp_conn_id: str = 'google_cloud_default',
-        export_format: str = 'csv',
+        export_format: str = 'parquet',
         schema_filename: Optional[str] = None,
         pandas_chunksize: Optional[int] = None,
         csv_kwargs: Optional[dict] = None,
@@ -105,7 +105,11 @@ class PostgresToGCSOperator(BaseOperator):
             mime_type = 'text/csv'
         elif self.export_format == 'parquet':
             # PyArrow is the default and optimal engine for parquet with PyArrow-backed DataFrames
-            parquet_kwargs = {'index': False, 'engine': 'pyarrow', **self.parquet_kwargs}
+            parquet_kwargs = {
+                'index': False,
+                'engine': 'pyarrow',
+                **self.parquet_kwargs,
+            }
             data_buffer = BytesIO()
             df.to_parquet(data_buffer, **parquet_kwargs)
             data_bytes = data_buffer.getvalue()

@@ -2,6 +2,7 @@
 Airflow operators for the airsql framework.
 """
 
+import time
 from typing import Any, List, Optional
 
 import pandas as pd
@@ -14,6 +15,7 @@ from airflow.sdk import Context
 
 from airsql.hooks import SQLHookManager
 from airsql.table import Table
+from airsql.utils import OperationSummary
 
 
 class BaseSQLOperator(BaseOperator):
@@ -83,15 +85,23 @@ class SQLAppendOperator(BaseSQLOperator):
     """
 
     def __init__(
-        self, sql: str, output_table: Table, source_conn: Optional[str] = None, **kwargs
+        self,
+        sql: str,
+        output_table: Table,
+        source_conn: Optional[str] = None,
+        dry_run: bool = False,
+        **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
+        self.dry_run = dry_run
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and append to the output table."""
+        start_time = time.time()
         self.log.info(f'Executing SQL query to append to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
+
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
             if isinstance(hook, BigQueryHook):
@@ -103,10 +113,28 @@ class SQLAppendOperator(BaseSQLOperator):
                     df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
                 finally:
                     conn.close()
-            self.log.info(f'Query returned {len(df)} rows')
-            self.hook_manager.write_dataframe_to_table(
-                df, self.output_table, if_exists='append'
+
+            duration = time.time() - start_time
+            summary = OperationSummary(
+                operation_type='append',
+                rows_extracted=len(df),
+                rows_loaded=len(df) if not self.dry_run else 0,
+                duration_seconds=duration,
+                format_used='parquet',
+                dry_run=self.dry_run,
             )
+
+            if not self.dry_run:
+                self.hook_manager.write_dataframe_to_table(
+                    df, self.output_table, if_exists='append'
+                )
+                self.log.info(f'Successfully appended {len(df)} rows')
+            else:
+                self.log.info(
+                    f'[DRY RUN] Would append {len(df)} rows to {self.output_table}'
+                )
+
+            self.log.info(summary.to_log_summary())
         else:
             raise ValueError(
                 f'source_conn is required for {self.__class__.__name__}. '

@@ -1,4 +1,4 @@
-from io import StringIO
+from io import BytesIO, StringIO
 
 import numpy as np
 import pandas as pd
@@ -89,13 +89,35 @@ class GCSToPostgresOperator(BaseOperator):
             cursor.close()
             conn.close()
 
+    @staticmethod
+    def _detect_file_format(filename: str) -> str:
+        """Detect file format from filename extension.
+
+        Args:
+            filename: The file path/name to detect format from
+
+        Returns:
+            'parquet' or 'csv'
+        """
+        if filename.endswith('.parquet'):
+            return 'parquet'
+        return 'csv'
+
     def execute(self, context):
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
         file_data = gcs_hook.download(
             bucket_name=self.bucket_name, object_name=self.object_name
         )
         pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
-        df = pd.read_csv(StringIO(file_data.decode('utf-8')))
+
+        # Auto-detect format from file extension
+        file_format = self._detect_file_format(self.object_name)
+        if file_format == 'parquet':
+            df = pd.read_parquet(BytesIO(file_data), engine='pyarrow')
+        else:  # csv
+            df = pd.read_csv(
+                StringIO(file_data.decode('utf-8')), dtype_backend='pyarrow'
+            )
 
         if '.' in self.target_table_name:
             schema, table_name_simple = self.target_table_name.split('.', 1)

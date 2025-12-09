@@ -37,6 +37,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         gcp_conn_id: str = 'google_cloud_default',
         gcs_bucket: str,
         gcs_temp_path: Optional[str] = None,
+        export_format: str = 'parquet',
         check_source_exists: bool = True,
         source_table_check_sql: Optional[str] = None,
         conflict_columns: Optional[List[str]] = None,
@@ -52,8 +53,11 @@ class BigQueryToPostgresOperator(BaseOperator):
         self.destination_table = destination_table
         self.gcp_conn_id = gcp_conn_id
         self.gcs_bucket = gcs_bucket
+        self.export_format = export_format.lower()
+        # Generate temp path with appropriate extension
+        file_ext = '.parquet' if self.export_format == 'parquet' else '.csv'
         self.gcs_temp_path = (
-            gcs_temp_path or f'temp/bq_to_postgres/{self.task_id}/data.csv'
+            gcs_temp_path or f'temp/bq_to_postgres/{self.task_id}/data{file_ext}'
         )
         self.check_source_exists = check_source_exists
         self.source_table_check_sql = source_table_check_sql
@@ -74,16 +78,21 @@ class BigQueryToPostgresOperator(BaseOperator):
         self.log.info(
             f'Extracting data from BigQuery to GCS: gs://{self.gcs_bucket}/{self.gcs_temp_path}'
         )
-        bq_to_gcs = BigQueryToGCSOperator(
-            task_id=f'{self.task_id}_extract',
-            source_project_dataset_table=self.source_table,
-            destination_cloud_storage_uris=[
+        # Build BigQueryToGCSOperator kwargs based on format
+        bq_to_gcs_kwargs = {
+            'task_id': f'{self.task_id}_extract',
+            'source_project_dataset_table': self.source_table,
+            'destination_cloud_storage_uris': [
                 f'gs://{self.gcs_bucket}/{self.gcs_temp_path}'
             ],
-            gcp_conn_id=self.gcp_conn_id,
-            export_format='CSV',
-            print_header=True,
-        )
+            'gcp_conn_id': self.gcp_conn_id,
+            'export_format': self.export_format.upper(),
+        }
+        # Only add print_header for CSV format
+        if self.export_format == 'csv':
+            bq_to_gcs_kwargs['print_header'] = True
+
+        bq_to_gcs = BigQueryToGCSOperator(**bq_to_gcs_kwargs)
         bq_to_gcs.execute(context)
 
         self.log.info(f'Loading data from GCS to PostgreSQL: {self.destination_table}')

@@ -39,6 +39,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         gcp_conn_id: str = 'google_cloud_default',
         gcs_bucket: str,
         gcs_temp_path: Optional[str] = None,
+        export_format: str = 'parquet',
         check_source_exists: bool = True,
         source_table_check_sql: Optional[str] = None,
         write_disposition: str = 'WRITE_TRUNCATE',
@@ -53,8 +54,11 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.destination_table = destination_project_dataset_table
         self.gcp_conn_id = gcp_conn_id
         self.gcs_bucket = gcs_bucket
+        self.export_format = export_format.lower()
+        # Generate temp path with appropriate extension
+        file_ext = '.parquet' if self.export_format == 'parquet' else '.csv'
         self.gcs_temp_path = (
-            gcs_temp_path or f'temp/postgres_to_bq/{self.task_id}/data.csv'
+            gcs_temp_path or f'temp/postgres_to_bq/{self.task_id}/data{file_ext}'
         )
 
         self.check_source_exists = check_source_exists
@@ -83,22 +87,27 @@ class PostgresToBigQueryOperator(BaseOperator):
             bucket=self.gcs_bucket,
             filename=self.gcs_temp_path,
             gcp_conn_id=self.gcp_conn_id,
-            export_format='csv',
+            export_format=self.export_format,
         )
         pg_to_gcs.execute(context)
 
         self.log.info(f'Loading data from GCS to BigQuery: {self.destination_table}')
-        gcs_to_bq = GCSToBigQueryOperator(
-            task_id=f'{self.task_id}_load',
-            bucket=self.gcs_bucket,
-            source_objects=[self.gcs_temp_path],
-            destination_project_dataset_table=self.destination_table,
-            gcp_conn_id=self.gcp_conn_id,
-            write_disposition=self.write_disposition,
-            create_disposition=self.create_disposition,
-            source_format='CSV',
-            skip_leading_rows=1,
-        )
+        # Build GCSToBigQueryOperator kwargs based on format
+        gcs_to_bq_kwargs = {
+            'task_id': f'{self.task_id}_load',
+            'bucket': self.gcs_bucket,
+            'source_objects': [self.gcs_temp_path],
+            'destination_project_dataset_table': self.destination_table,
+            'gcp_conn_id': self.gcp_conn_id,
+            'write_disposition': self.write_disposition,
+            'create_disposition': self.create_disposition,
+            'source_format': self.export_format.upper(),
+        }
+        # Only add skip_leading_rows for CSV format
+        if self.export_format == 'csv':
+            gcs_to_bq_kwargs['skip_leading_rows'] = 1
+
+        gcs_to_bq = GCSToBigQueryOperator(**gcs_to_bq_kwargs)
         gcs_to_bq.execute(context)
 
         if self.cleanup_temp_files:
