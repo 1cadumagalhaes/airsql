@@ -2,6 +2,7 @@
 Operator to transfer data from PostgreSQL to Google Cloud Storage.
 """
 
+import time
 import warnings
 from io import BytesIO, StringIO
 from typing import Optional, Sequence
@@ -9,6 +10,8 @@ from typing import Optional, Sequence
 from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+from airsql.utils import DataValidator, OperationSummary
 
 
 class PostgresToGCSOperator(BaseOperator):
@@ -62,6 +65,7 @@ class PostgresToGCSOperator(BaseOperator):
         pandas_chunksize: Optional[int] = None,
         csv_kwargs: Optional[dict] = None,
         parquet_kwargs: Optional[dict] = None,
+        dry_run: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -75,6 +79,7 @@ class PostgresToGCSOperator(BaseOperator):
         self.pandas_chunksize = pandas_chunksize
         self.csv_kwargs = csv_kwargs or {}
         self.parquet_kwargs = parquet_kwargs or {}
+        self.dry_run = dry_run
 
         if self.export_format not in {'csv', 'parquet'}:
             raise ValueError(
@@ -82,6 +87,7 @@ class PostgresToGCSOperator(BaseOperator):
             )
 
     def execute(self, context) -> str:
+        start_time = time.time()
         pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
 
@@ -96,6 +102,14 @@ class PostgresToGCSOperator(BaseOperator):
             return f'gs://{self.bucket}/{self.filename}'
 
         self.log.info(f'Extracted {len(df)} rows from Postgres.')
+
+        # Validate DataFrame
+        validation_result = DataValidator.validate_row_count(df, min_rows=1)
+        if validation_result.errors:
+            for error in validation_result.errors:
+                self.log.error(f'Validation error: {error}')
+        for warning in validation_result.warnings:
+            self.log.warning(f'Validation warning: {warning}')
 
         if self.export_format == 'csv':
             csv_kwargs = {'index': False, **self.csv_kwargs}
@@ -115,23 +129,42 @@ class PostgresToGCSOperator(BaseOperator):
             data_bytes = data_buffer.getvalue()
             mime_type = 'application/octet-stream'
 
-        self.log.info(
-            f'Uploading data as {self.export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
+        duration = time.time() - start_time
+        summary = OperationSummary(
+            operation_type='export',
+            rows_extracted=len(df),
+            rows_loaded=len(df) if not self.dry_run else 0,
+            duration_seconds=duration,
+            file_size_mb=len(data_bytes) / (1024 * 1024),
+            format_used=self.export_format,
+            validation_errors=validation_result.errors,
+            validation_warnings=validation_result.warnings,
+            dry_run=self.dry_run,
         )
-        gcs_hook.upload(
-            bucket_name=self.bucket,
-            object_name=self.filename,
-            data=data_bytes,
-            mime_type=mime_type,
-        )
-        self.log.info('Upload complete.')
 
-        # TODO: Implement schema_filename upload if needed
-        if self.schema_filename:
-            warnings.warn(
-                'Schema file upload is not yet implemented in PostgresToGCSOperator.',
-                UserWarning,
-                stacklevel=2,
+        if not self.dry_run:
+            self.log.info(
+                f'Uploading data as {self.export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
+            )
+            gcs_hook.upload(
+                bucket_name=self.bucket,
+                object_name=self.filename,
+                data=data_bytes,
+                mime_type=mime_type,
+            )
+            self.log.info('Upload complete.')
+
+            # TODO: Implement schema_filename upload if needed
+            if self.schema_filename:
+                warnings.warn(
+                    'Schema file upload is not yet implemented in PostgresToGCSOperator.',
+                    UserWarning,
+                    stacklevel=2,
+                )
+        else:
+            self.log.info(
+                f'[DRY RUN] Would upload {len(df)} rows as {self.export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
             )
 
+        self.log.info(summary.to_log_summary())
         return f'gs://{self.bucket}/{self.filename}'

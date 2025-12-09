@@ -1,3 +1,4 @@
+import time
 from io import BytesIO, StringIO
 
 import numpy as np
@@ -7,6 +8,8 @@ from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from psycopg2 import sql as psycopg2_sql
 from psycopg2.extras import execute_values
+
+from airsql.utils import DataValidator, OperationSummary
 
 
 class GCSToPostgresOperator(BaseOperator):
@@ -21,6 +24,7 @@ class GCSToPostgresOperator(BaseOperator):
         replace=False,
         grant_table_privileges: bool = True,
         audit_cols_to_exclude=None,
+        dry_run: bool = False,
         *args,
         **kwargs,
     ):
@@ -33,6 +37,7 @@ class GCSToPostgresOperator(BaseOperator):
         self.conflict_columns = conflict_columns
         self.replace = replace
         self.grant_table_privileges = grant_table_privileges
+        self.dry_run = dry_run
         self.audit_cols_to_exclude = audit_cols_to_exclude or {
             'criado_em',
             'atualizado_em',
@@ -104,6 +109,7 @@ class GCSToPostgresOperator(BaseOperator):
         return 'csv'
 
     def execute(self, context):
+        start_time = time.time()
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
         file_data = gcs_hook.download(
             bucket_name=self.bucket_name, object_name=self.object_name
@@ -147,29 +153,60 @@ class GCSToPostgresOperator(BaseOperator):
         common_columns = [col for col in df.columns if col in model_columns]
         df_filtered = df[common_columns].replace({np.nan: None})
 
-        if self.replace:
-            self.log.info(f'Truncating and replacing data in table {table_name_full}')
-            self._truncate_and_insert_data(
-                pg_hook, schema, table_name_simple, df_filtered
-            )
-        elif not self.conflict_columns:
-            engine = pg_hook.get_sqlalchemy_engine()
-            self.log.info(f'Appending DataFrame to Postgres table {table_name_full}')
-            df_filtered.to_sql(
-                name=table_name_simple,
-                con=engine,
-                schema=schema,
-                if_exists='append',
-                index=False,
-                method='multi',
-                chunksize=1000,
-                dtype_backend='pyarrow',
-            )
-            self.log.info('Append to Postgres complete.')
-        else:
-            self._upsert_data(pg_hook, schema, table_name_simple, df_filtered)
+        # Validate DataFrame
+        validation_result = DataValidator.validate_columns(
+            df_filtered, expected_columns=common_columns
+        )
+        if validation_result.errors:
+            for error in validation_result.errors:
+                self.log.error(f'Validation error: {error}')
+        for warning in validation_result.warnings:
+            self.log.warning(f'Validation warning: {warning}')
 
-        self._grant_table_privileges(pg_hook, schema, table_name_simple)
+        duration = time.time() - start_time
+        operation_type = 'replace' if self.replace else ('upsert' if self.conflict_columns else 'append')
+        summary = OperationSummary(
+            operation_type=operation_type,
+            rows_extracted=len(df),
+            rows_loaded=len(df_filtered) if not self.dry_run else 0,
+            duration_seconds=duration,
+            file_size_mb=len(file_data) / (1024 * 1024),
+            format_used=file_format,
+            validation_errors=validation_result.errors,
+            validation_warnings=validation_result.warnings,
+            dry_run=self.dry_run,
+        )
+
+        if not self.dry_run:
+            if self.replace:
+                self.log.info(f'Truncating and replacing data in table {table_name_full}')
+                self._truncate_and_insert_data(
+                    pg_hook, schema, table_name_simple, df_filtered
+                )
+            elif not self.conflict_columns:
+                engine = pg_hook.get_sqlalchemy_engine()
+                self.log.info(f'Appending DataFrame to Postgres table {table_name_full}')
+                df_filtered.to_sql(
+                    name=table_name_simple,
+                    con=engine,
+                    schema=schema,
+                    if_exists='append',
+                    index=False,
+                    method='multi',
+                    chunksize=1000,
+                    dtype_backend='pyarrow',
+                )
+                self.log.info('Append to Postgres complete.')
+            else:
+                self._upsert_data(pg_hook, schema, table_name_simple, df_filtered)
+
+            self._grant_table_privileges(pg_hook, schema, table_name_simple)
+        else:
+            self.log.info(
+                f'[DRY RUN] Would {operation_type} {len(df_filtered)} rows to {table_name_full}'
+            )
+
+        self.log.info(summary.to_log_summary())
 
     def _truncate_and_insert_data(
         self, pg_hook, schema, table_name_simple, df_filtered
