@@ -17,17 +17,32 @@ from airsql.table import Table
 
 
 class BaseSQLOperator(BaseOperator):
-    """Base class for SQL operators."""
+    """Base class for SQL operators.
+
+    Supports arbitrary extra arguments for dynamic task naming and mapping.
+    Any kwargs not recognized by BaseOperator are stored as instance attributes.
+    """
 
     def __init__(self, sql: str, source_conn: Optional[str] = None, **kwargs):
+        # Extract operator-specific params that BaseOperator recognizes
+        # Store all other kwargs as instance attributes for dynamic task usage
         super().__init__(**kwargs)
         self.sql = sql
         self.source_conn = source_conn
         self.hook_manager = SQLHookManager()
 
+        # Store extra kwargs as instance attributes for task mapping
+        # This enables use with partial().expand_kwargs() for dynamic tasks
+        for key, value in kwargs.items():
+            if not hasattr(self, key):
+                setattr(self, key, value)
+
 
 class SQLQueryOperator(BaseSQLOperator):
-    """Operator for SQL queries that write to a destination table."""
+    """Operator for SQL queries that write to a destination table.
+
+    Supports extra kwargs for dynamic task naming and mapping.
+    """
 
     def __init__(
         self, sql: str, output_table: Table, source_conn: Optional[str] = None, **kwargs
@@ -44,16 +59,59 @@ class SQLQueryOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use raw DBAPI connection for pandas
+                # Use raw DBAPI connection for pandas with PyArrow for optimization
                 conn = hook.get_conn()
                 try:
-                    df = pd.read_sql(self.sql, conn)
+                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
                 finally:
                     conn.close()
             self.log.info(f'Query returned {len(df)} rows')
             self.hook_manager.write_dataframe_to_table(df, self.output_table)
         else:
-            raise NotImplementedError('Cross-database queries not yet implemented')
+            raise ValueError(
+                f'source_conn is required for {self.__class__.__name__}. '
+                'Please provide a connection ID to query from.'
+            )
+
+        return str(self.output_table)
+
+
+class SQLAppendOperator(BaseSQLOperator):
+    """Operator for SQL queries that append data to a destination table.
+
+    Supports extra kwargs for dynamic task naming and mapping.
+    """
+
+    def __init__(
+        self, sql: str, output_table: Table, source_conn: Optional[str] = None, **kwargs
+    ):
+        super().__init__(sql=sql, source_conn=source_conn, **kwargs)
+        self.output_table = output_table
+
+    def execute(self, context: Context) -> str:
+        """Execute the SQL query and append to the output table."""
+        self.log.info(f'Executing SQL query to append to {self.output_table}')
+        self.log.debug(f'SQL Query: {self.sql}')
+        if self.source_conn:
+            hook = self.hook_manager.get_hook(self.source_conn)
+            if isinstance(hook, BigQueryHook):
+                df = hook.get_pandas_df(self.sql, dialect='standard')
+            else:
+                # Use raw DBAPI connection for pandas with PyArrow for optimization
+                conn = hook.get_conn()
+                try:
+                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
+                finally:
+                    conn.close()
+            self.log.info(f'Query returned {len(df)} rows')
+            self.hook_manager.write_dataframe_to_table(
+                df, self.output_table, if_exists='append'
+            )
+        else:
+            raise ValueError(
+                f'source_conn is required for {self.__class__.__name__}. '
+                'Please provide a connection ID to query from.'
+            )
 
         return str(self.output_table)
 
@@ -71,10 +129,10 @@ class SQLDataFrameOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use raw DBAPI connection for pandas
+                # Use raw DBAPI connection for pandas with PyArrow for optimization
                 conn = hook.get_conn()
                 try:
-                    df = pd.read_sql(self.sql, conn)
+                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
                 finally:
                     conn.close()
             self.log.info(
@@ -82,11 +140,17 @@ class SQLDataFrameOperator(BaseSQLOperator):
             )
             return df
         else:
-            raise NotImplementedError('Cross-database queries not yet implemented')
+            raise ValueError(
+                f'source_conn is required for {self.__class__.__name__}. '
+                'Please provide a connection ID to query from.'
+            )
 
 
 class SQLReplaceOperator(BaseSQLOperator):
-    """Operator for SQL queries that replace the destination table content."""
+    """Operator for SQL queries that replace the destination table content.
+
+    Supports extra kwargs for dynamic task naming and mapping.
+    """
 
     def __init__(
         self, sql: str, output_table: Table, source_conn: Optional[str] = None, **kwargs
@@ -104,22 +168,28 @@ class SQLReplaceOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use raw DBAPI connection for pandas
+                # Use raw DBAPI connection for pandas with PyArrow for optimization
                 conn = hook.get_conn()
                 try:
-                    df = pd.read_sql(self.sql, conn)
+                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
                 finally:
                     conn.close()
             self.log.info(f'Query returned {len(df)} rows, replacing table content')
             self.hook_manager.replace_table_content(df, self.output_table)
         else:
-            raise NotImplementedError('Cross-database queries not yet implemented')
+            raise ValueError(
+                f'source_conn is required for {self.__class__.__name__}. '
+                'Please provide a connection ID to query from.'
+            )
 
         return str(self.output_table)
 
 
 class SQLTruncateOperator(BaseSQLOperator):
-    """Operator for SQL queries that truncate the destination table and insert new data, preserving structure."""
+    """Operator for SQL queries that truncate the destination table and insert new data, preserving structure.
+
+    Supports extra kwargs for dynamic task naming and mapping.
+    """
 
     def __init__(
         self, sql: str, output_table: Table, source_conn: Optional[str] = None, **kwargs
@@ -137,10 +207,10 @@ class SQLTruncateOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use raw DBAPI connection for pandas
+                # Use raw DBAPI connection for pandas with PyArrow for optimization
                 conn = hook.get_conn()
                 try:
-                    df = pd.read_sql(self.sql, conn)
+                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
                 finally:
                     conn.close()
             self.log.info(
@@ -148,13 +218,19 @@ class SQLTruncateOperator(BaseSQLOperator):
             )
             self.hook_manager.truncate_table_content(df, self.output_table)
         else:
-            raise NotImplementedError('Cross-database queries not yet implemented')
+            raise ValueError(
+                f'source_conn is required for {self.__class__.__name__}. '
+                'Please provide a connection ID to query from.'
+            )
 
         return str(self.output_table)
 
 
 class SQLMergeOperator(BaseSQLOperator):
-    """Operator for SQL queries that merge/upsert into the destination table."""
+    """Operator for SQL queries that merge/upsert into the destination table.
+
+    Supports extra kwargs for dynamic task naming and mapping.
+    """
 
     def __init__(
         self,
@@ -185,10 +261,10 @@ class SQLMergeOperator(BaseSQLOperator):
             if isinstance(hook, BigQueryHook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
-                # Use raw DBAPI connection for pandas
+                # Use raw DBAPI connection for pandas with PyArrow for optimization
                 conn = hook.get_conn()
                 try:
-                    df = pd.read_sql(self.sql, conn)
+                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
                 finally:
                     conn.close()
 
@@ -206,13 +282,19 @@ class SQLMergeOperator(BaseSQLOperator):
                 update_columns=self.update_columns,
             )
         else:
-            raise NotImplementedError('Cross-database queries not yet implemented')
+            raise ValueError(
+                f'source_conn is required for {self.__class__.__name__}. '
+                'Please provide a connection ID to query from.'
+            )
 
         return str(self.output_table)
 
 
 class DataFrameLoadOperator(BaseOperator):
-    """Operator for loading DataFrame data into a table."""
+    """Operator for loading DataFrame data into a table.
+
+    Supports extra kwargs for dynamic task naming and mapping.
+    """
 
     def __init__(
         self,
@@ -228,6 +310,11 @@ class DataFrameLoadOperator(BaseOperator):
         self.timestamp_column = timestamp_column
         self.if_exists = if_exists
         self.hook_manager = SQLHookManager()
+
+        # Store extra kwargs as instance attributes for task mapping
+        for key, value in kwargs.items():
+            if not hasattr(self, key):
+                setattr(self, key, value)
 
     def execute(self, context: Context) -> None:
         """Execute the DataFrame load operation."""
@@ -246,7 +333,10 @@ class DataFrameLoadOperator(BaseOperator):
 
 
 class DataFrameMergeOperator(BaseOperator):
-    """Operator for merging DataFrame data into a table."""
+    """Operator for merging DataFrame data into a table.
+
+    Supports extra kwargs for dynamic task naming and mapping.
+    """
 
     def __init__(
         self,
@@ -266,6 +356,11 @@ class DataFrameMergeOperator(BaseOperator):
         self.timestamp_column = timestamp_column
         self.pre_truncate = pre_truncate
         self.hook_manager = SQLHookManager()
+
+        # Store extra kwargs as instance attributes for task mapping
+        for key, value in kwargs.items():
+            if not hasattr(self, key):
+                setattr(self, key, value)
 
     def execute(self, context: Context) -> None:
         """Execute the DataFrame merge operation."""

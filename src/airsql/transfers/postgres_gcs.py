@@ -86,7 +86,10 @@ class PostgresToGCSOperator(BaseOperator):
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
 
         self.log.info(f'Extracting data from Postgres using query: {self.sql}')
-        df = pg_hook.get_pandas_df(sql=self.sql, chunksize=self.pandas_chunksize)
+        # Use PyArrow backend for better performance and type handling
+        df = pg_hook.get_pandas_df(
+            sql=self.sql, chunksize=self.pandas_chunksize, dtype_backend='pyarrow'
+        )
 
         if df.empty:
             self.log.info('No data extracted from Postgres. Skipping upload to GCS.')
@@ -101,7 +104,8 @@ class PostgresToGCSOperator(BaseOperator):
             data_bytes = data_buffer.getvalue().encode('utf-8')
             mime_type = 'text/csv'
         elif self.export_format == 'parquet':
-            parquet_kwargs = {'index': False, **self.parquet_kwargs}
+            # PyArrow is the default and optimal engine for parquet with PyArrow-backed DataFrames
+            parquet_kwargs = {'index': False, 'engine': 'pyarrow', **self.parquet_kwargs}
             data_buffer = BytesIO()
             df.to_parquet(data_buffer, **parquet_kwargs)
             data_bytes = data_buffer.getvalue()

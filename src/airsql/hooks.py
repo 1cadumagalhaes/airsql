@@ -294,7 +294,7 @@ class SQLHookManager:
     def _write_to_postgres(
         df: pd.DataFrame, table: Table, if_exists: str = 'append'
     ) -> None:
-        """Write DataFrame to Postgres table."""
+        """Write DataFrame to Postgres table using PyArrow for optimization."""
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         engine = hook.get_sqlalchemy_engine()
         if '.' in table.table_name:
@@ -309,6 +309,7 @@ class SQLHookManager:
             if_exists=if_exists,
             index=False,
             method='multi',
+            dtype_backend='pyarrow',
         )
 
     @staticmethod
@@ -348,7 +349,7 @@ class SQLHookManager:
 
     @staticmethod
     def _replace_postgres_table(df: pd.DataFrame, table: Table) -> None:
-        """Replace Postgres table content."""
+        """Replace Postgres table content using PyArrow for optimization."""
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         engine = hook.get_sqlalchemy_engine()
         if '.' in table.table_name:
@@ -364,6 +365,7 @@ class SQLHookManager:
             if_exists='replace',
             index=False,
             method='multi',
+            dtype_backend='pyarrow',
         )
 
     @staticmethod
@@ -546,7 +548,7 @@ WHEN NOT MATCHED THEN
 
     @staticmethod
     def _truncate_postgres_table(df: pd.DataFrame, table: Table) -> None:
-        """Truncate Postgres table content, preserving table structure and sequences."""
+        """Truncate Postgres table content, preserving table structure and sequences using PyArrow."""
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         engine = hook.get_sqlalchemy_engine()
 
@@ -565,7 +567,7 @@ WHEN NOT MATCHED THEN
             truncate_sql = f'TRUNCATE TABLE {full_table_name} RESTART IDENTITY'
             conn.execute(text(truncate_sql))
 
-            # Insert new data
+            # Insert new data with PyArrow optimization
             df.to_sql(
                 table_name,
                 conn,
@@ -573,4 +575,5 @@ WHEN NOT MATCHED THEN
                 if_exists='append',
                 index=False,
                 method='multi',
+                dtype_backend='pyarrow',
             )

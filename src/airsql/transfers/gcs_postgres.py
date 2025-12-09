@@ -42,13 +42,20 @@ class GCSToPostgresOperator(BaseOperator):
 
     @staticmethod
     def _dataframe_to_tuples(df):
-        """Convert DataFrame to tuples with proper type conversion for PostgreSQL."""
-        # This automatically converts numpy types to Python native types
-        df_converted = df.convert_dtypes()
+        """Convert DataFrame to tuples with proper type conversion for PostgreSQL.
 
-        df_converted = df_converted.replace({pd.NA: None, np.nan: None})
+        Handles both PyArrow-backed and standard pandas DataFrames efficiently.
+        """
+        # For PyArrow-backed DataFrames, convert to numpy with None for nulls
+        # For standard pandas DataFrames, convert_dtypes handles NA values
+        if hasattr(df, '__arrow_c_stream__'):  # PyArrow-backed DataFrame
+            # Use to_numpy to preserve null handling
+            df_clean = df.where(pd.notna(df), None)
+        else:
+            # Standard pandas DataFrame
+            df_clean = df.convert_dtypes().replace({pd.NA: None, np.nan: None})
 
-        return [tuple(row) for row in df_converted.values.tolist()]
+        return [tuple(row) for row in df_clean.values.tolist()]
 
     def _grant_table_privileges(self, pg_hook, schema, table_name_simple):
         """Grant all privileges on table to public."""
@@ -134,6 +141,7 @@ class GCSToPostgresOperator(BaseOperator):
                 index=False,
                 method='multi',
                 chunksize=1000,
+                dtype_backend='pyarrow',
             )
             self.log.info('Append to Postgres complete.')
         else:

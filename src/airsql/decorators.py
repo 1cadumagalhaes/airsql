@@ -16,6 +16,7 @@ from airsql.file import File
 from airsql.operators import (
     DataFrameLoadOperator,
     DataFrameMergeOperator,
+    SQLAppendOperator,
     SQLCheckOperator,
     SQLDataFrameOperator,
     SQLMergeOperator,
@@ -166,7 +167,8 @@ class SQLDecorators:
             output_table: Table to write results to (optional)
             source_conn: Connection ID for simple queries without table parameters
             sql_file: Path to SQL file (relative to sql_files_path)
-            **template_vars: Variables to pass to Jinja template
+            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
+                            are passed as kwargs to the operator for dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -180,7 +182,53 @@ class SQLDecorators:
                 if output_table:
                     op_kwargs['outlets'] = [output_table.as_asset()]
 
+                # Pass through extra template vars to operator for dynamic task naming
+                op_kwargs.update(template_vars)
+
                 operator = SQLQueryOperator(
+                    task_id=func.__name__,
+                    sql=sql_query,
+                    output_table=output_table,
+                    source_conn=source_conn,
+                    **op_kwargs,
+                )
+
+                return operator
+
+            return wrapper
+
+        return decorator
+
+    def append(
+        self,
+        output_table: Table,
+        source_conn: Optional[str] = None,
+        sql_file: Optional[str] = None,
+        **template_vars,
+    ) -> Callable:
+        """
+        Decorator for SQL queries that append data to a destination table.
+
+        Args:
+            output_table: Table to append data to
+            source_conn: Connection ID for the source database
+            sql_file: Path to SQL file (relative to sql_files_path)
+            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
+                            are passed as kwargs to the operator for dynamic task naming.
+        """
+
+        def decorator(func: Callable) -> Callable:
+            @wraps(func)
+            def wrapper(*args, **kwargs) -> Any:
+                sql_query = self._process_sql_input(
+                    func, args, kwargs, sql_file, **template_vars
+                )
+
+                op_kwargs = {'outlets': [output_table.as_asset()]}
+                # Pass through extra template vars to operator for dynamic task naming
+                op_kwargs.update(template_vars)
+
+                operator = SQLAppendOperator(
                     task_id=func.__name__,
                     sql=sql_query,
                     output_table=output_table,
@@ -249,7 +297,8 @@ class SQLDecorators:
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
             method: Replace method - 'replace' (default) or 'truncate'
-            **template_vars: Variables to pass to Jinja template
+            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
+                            are passed as kwargs to the operator for dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -260,6 +309,8 @@ class SQLDecorators:
                 )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
+                # Pass through extra template vars to operator for dynamic task naming
+                op_kwargs.update(template_vars)
 
                 if method == 'truncate':
                     operator = SQLTruncateOperator(
@@ -299,7 +350,8 @@ class SQLDecorators:
             output_table: Table to truncate and reload
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
-            **template_vars: Variables to pass to Jinja template
+            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
+                            are passed as kwargs to the operator for dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -310,6 +362,8 @@ class SQLDecorators:
                 )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
+                # Pass through extra template vars to operator for dynamic task naming
+                op_kwargs.update(template_vars)
 
                 operator = SQLTruncateOperator(
                     task_id=func.__name__,
@@ -345,7 +399,8 @@ class SQLDecorators:
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
             pre_truncate: If True, truncate the table before performing the merge
-            **template_vars: Variables to pass to Jinja template
+            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
+                            are passed as kwargs to the operator for dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -356,6 +411,8 @@ class SQLDecorators:
                 )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
+                # Pass through extra template vars to operator for dynamic task naming
+                op_kwargs.update(template_vars)
 
                 operator = SQLMergeOperator(
                     task_id=func.__name__,
@@ -380,6 +437,7 @@ class SQLDecorators:
         timestamp_column: Optional[str] = None,
         if_exists: str = 'append',
         dataframe: Optional[pd.DataFrame] = None,
+        **extra_kwargs,
     ) -> Callable:
         """
         Decorator for functions that return a DataFrame to be loaded into a table,
@@ -390,6 +448,7 @@ class SQLDecorators:
             timestamp_column: Custom timestamp column name (optional)
             if_exists: How to behave if table exists ('append', 'replace', 'truncate', 'fail')
             dataframe: Pre-existing DataFrame to load (optional)
+            **extra_kwargs: Extra keyword arguments for dynamic task naming and mapping
 
         Example 1 - Function that returns DataFrame:
             @sql.load_dataframe(
@@ -435,6 +494,8 @@ class SQLDecorators:
                     )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
+                # Pass through extra kwargs for dynamic task naming
+                op_kwargs.update(extra_kwargs)
 
                 operator = DataFrameLoadOperator(
                     task_id=func.__name__,
@@ -458,6 +519,7 @@ class SQLDecorators:
         update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
         dataframe: Optional[pd.DataFrame] = None,
+        **extra_kwargs,
     ) -> Callable:
         """
         Decorator for functions that return a DataFrame to be merged/upserted
@@ -469,6 +531,7 @@ class SQLDecorators:
             update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
             timestamp_column: Custom timestamp column name (optional)
             dataframe: Pre-existing DataFrame to merge (optional)
+            **extra_kwargs: Extra keyword arguments for dynamic task naming and mapping
 
         Example 1 - Function that returns DataFrame:
             @sql.merge_dataframe(
@@ -517,6 +580,8 @@ class SQLDecorators:
                     )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
+                # Pass through extra kwargs for dynamic task naming
+                op_kwargs.update(extra_kwargs)
 
                 operator = DataFrameMergeOperator(
                     task_id=func.__name__,
