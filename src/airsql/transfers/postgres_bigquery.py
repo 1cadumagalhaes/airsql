@@ -46,6 +46,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         create_disposition: str = 'CREATE_IF_NEEDED',
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
+        dry_run: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -67,12 +68,16 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.create_disposition = create_disposition
         self.emit_asset = emit_asset
         self.cleanup_temp_files = cleanup_temp_files
+        self.dry_run = dry_run
 
         if self.emit_asset:
             self.outlets = [Asset(f'airsql://database/{self.destination_table}')]
 
     def execute(self, context: Context) -> Any:
         """Execute the PostgreSQL to BigQuery transfer."""
+
+        if self.dry_run:
+            self.log.info('[DRY RUN] PostgreSQL to BigQuery transfer')
 
         if self.check_source_exists:
             self._check_source_data(context)
@@ -88,34 +93,41 @@ class PostgresToBigQueryOperator(BaseOperator):
             filename=self.gcs_temp_path,
             gcp_conn_id=self.gcp_conn_id,
             export_format=self.export_format,
+            dry_run=self.dry_run,
         )
         pg_to_gcs.execute(context)
 
-        self.log.info(f'Loading data from GCS to BigQuery: {self.destination_table}')
-        # Build GCSToBigQueryOperator kwargs based on format
-        gcs_to_bq_kwargs = {
-            'task_id': f'{self.task_id}_load',
-            'bucket': self.gcs_bucket,
-            'source_objects': [self.gcs_temp_path],
-            'destination_project_dataset_table': self.destination_table,
-            'gcp_conn_id': self.gcp_conn_id,
-            'write_disposition': self.write_disposition,
-            'create_disposition': self.create_disposition,
-            'source_format': self.export_format.upper(),
-        }
-        # Only add skip_leading_rows for CSV format
-        if self.export_format == 'csv':
-            gcs_to_bq_kwargs['skip_leading_rows'] = 1
+        if not self.dry_run:
+            self.log.info(f'Loading data from GCS to BigQuery: {self.destination_table}')
+            # Build GCSToBigQueryOperator kwargs based on format
+            gcs_to_bq_kwargs = {
+                'task_id': f'{self.task_id}_load',
+                'bucket': self.gcs_bucket,
+                'source_objects': [self.gcs_temp_path],
+                'destination_project_dataset_table': self.destination_table,
+                'gcp_conn_id': self.gcp_conn_id,
+                'write_disposition': self.write_disposition,
+                'create_disposition': self.create_disposition,
+                'source_format': self.export_format.upper(),
+            }
+            # Only add skip_leading_rows for CSV format
+            if self.export_format == 'csv':
+                gcs_to_bq_kwargs['skip_leading_rows'] = 1
 
-        gcs_to_bq = GCSToBigQueryOperator(**gcs_to_bq_kwargs)
-        gcs_to_bq.execute(context)
+            gcs_to_bq = GCSToBigQueryOperator(**gcs_to_bq_kwargs)
+            gcs_to_bq.execute(context)
 
-        if self.cleanup_temp_files:
-            self._cleanup_temp_files()
+            if self.cleanup_temp_files:
+                self._cleanup_temp_files()
 
-        self.log.info(
-            f'Successfully transferred data from PostgreSQL to BigQuery table: {self.destination_table}'
-        )
+            self.log.info(
+                f'Successfully transferred data from PostgreSQL to BigQuery table: {self.destination_table}'
+            )
+        else:
+            self.log.info(
+                f'[DRY RUN] Would load data from GCS to BigQuery: {self.destination_table}'
+            )
+
         return self.destination_table
 
     def _check_source_data(self, context: Context) -> None:

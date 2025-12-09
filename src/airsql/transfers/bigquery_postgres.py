@@ -44,6 +44,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         replace: bool = True,
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
+        dry_run: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -65,6 +66,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         self.replace = replace
         self.emit_asset = emit_asset
         self.cleanup_temp_files = cleanup_temp_files
+        self.dry_run = dry_run
 
         if self.emit_asset:
             self.outlets = [Asset(f'airsql://database/{self.destination_table}')]
@@ -72,30 +74,42 @@ class BigQueryToPostgresOperator(BaseOperator):
     def execute(self, context: Context) -> Any:
         """Execute the BigQuery to PostgreSQL transfer."""
 
+        if self.dry_run:
+            self.log.info('[DRY RUN] BigQuery to PostgreSQL transfer')
+
         if self.check_source_exists:
             self._check_source_data(context)
 
-        self.log.info(
-            f'Extracting data from BigQuery to GCS: gs://{self.gcs_bucket}/{self.gcs_temp_path}'
-        )
-        # Build BigQueryToGCSOperator kwargs based on format
-        bq_to_gcs_kwargs = {
-            'task_id': f'{self.task_id}_extract',
-            'source_project_dataset_table': self.source_table,
-            'destination_cloud_storage_uris': [
-                f'gs://{self.gcs_bucket}/{self.gcs_temp_path}'
-            ],
-            'gcp_conn_id': self.gcp_conn_id,
-            'export_format': self.export_format.upper(),
-        }
-        # Only add print_header for CSV format
-        if self.export_format == 'csv':
-            bq_to_gcs_kwargs['print_header'] = True
+        if not self.dry_run:
+            self.log.info(
+                f'Extracting data from BigQuery to GCS: gs://{self.gcs_bucket}/{self.gcs_temp_path}'
+            )
+            # Build BigQueryToGCSOperator kwargs based on format
+            bq_to_gcs_kwargs = {
+                'task_id': f'{self.task_id}_extract',
+                'source_project_dataset_table': self.source_table,
+                'destination_cloud_storage_uris': [
+                    f'gs://{self.gcs_bucket}/{self.gcs_temp_path}'
+                ],
+                'gcp_conn_id': self.gcp_conn_id,
+                'export_format': self.export_format.upper(),
+            }
+            # Only add print_header for CSV format
+            if self.export_format == 'csv':
+                bq_to_gcs_kwargs['print_header'] = True
 
-        bq_to_gcs = BigQueryToGCSOperator(**bq_to_gcs_kwargs)
-        bq_to_gcs.execute(context)
+            bq_to_gcs = BigQueryToGCSOperator(**bq_to_gcs_kwargs)
+            bq_to_gcs.execute(context)
 
-        self.log.info(f'Loading data from GCS to PostgreSQL: {self.destination_table}')
+            self.log.info(f'Loading data from GCS to PostgreSQL: {self.destination_table}')
+        else:
+            self.log.info(
+                f'[DRY RUN] Would extract data from BigQuery to GCS: gs://{self.gcs_bucket}/{self.gcs_temp_path}'
+            )
+            self.log.info(
+                f'[DRY RUN] Would load data from GCS to PostgreSQL: {self.destination_table}'
+            )
+
         gcs_to_pg = GCSToPostgresOperator(
             task_id=f'{self.task_id}_load',
             target_table_name=self.destination_table,
@@ -105,16 +119,18 @@ class BigQueryToPostgresOperator(BaseOperator):
             gcp_conn_id=self.gcp_conn_id,
             conflict_columns=self.conflict_columns,
             replace=self.replace,
+            dry_run=self.dry_run,
         )
         gcs_to_pg.execute(context)
 
-        if self.cleanup_temp_files:
+        if not self.dry_run and self.cleanup_temp_files:
             self._cleanup_temp_files()
 
-        self.log.info(
-            'Successfully transferred data from BigQuery '
-            'to PostgreSQL table: {self.destination_table}'
-        )
+        if not self.dry_run:
+            self.log.info(
+                f'Successfully transferred data from BigQuery to PostgreSQL table: {self.destination_table}'
+            )
+
         return self.destination_table
 
     def _check_source_data(self, context: Context) -> None:
