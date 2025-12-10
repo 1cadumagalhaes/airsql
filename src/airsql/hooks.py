@@ -425,11 +425,12 @@ WHEN NOT MATCHED THEN
   INSERT ({', '.join(all_columns)})
   VALUES ({', '.join([f'source.{col}' for col in all_columns])})
 """  # noqa: S608
-            hook.run_query(
-                sql=merge_sql,
-                location=table.location,
+            job_config = bigquery.QueryJobConfig(
                 use_legacy_sql=False,
+                location=table.location,
             )
+            query_job = client.query(merge_sql, job_config=job_config)
+            query_job.result()  # Wait for the job to complete
 
         finally:
             try:
