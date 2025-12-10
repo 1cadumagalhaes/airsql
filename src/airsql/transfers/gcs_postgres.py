@@ -108,7 +108,7 @@ class GCSToPostgresOperator(BaseOperator):
             return 'parquet'
         return 'csv'
 
-    def execute(self, context):
+    def execute(self, context):  # noqa: PLR0912, PLR0914
         start_time = time.time()
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
         file_data = gcs_hook.download(
@@ -164,7 +164,11 @@ class GCSToPostgresOperator(BaseOperator):
             self.log.warning(f'Validation warning: {warning}')
 
         duration = time.time() - start_time
-        operation_type = 'replace' if self.replace else ('upsert' if self.conflict_columns else 'append')
+        operation_type = (
+            'replace'
+            if self.replace
+            else ('upsert' if self.conflict_columns else 'append')
+        )
         summary = OperationSummary(
             operation_type=operation_type,
             rows_extracted=len(df),
@@ -179,13 +183,17 @@ class GCSToPostgresOperator(BaseOperator):
 
         if not self.dry_run:
             if self.replace:
-                self.log.info(f'Truncating and replacing data in table {table_name_full}')
+                self.log.info(
+                    f'Truncating and replacing data in table {table_name_full}'
+                )
                 self._truncate_and_insert_data(
                     pg_hook, schema, table_name_simple, df_filtered
                 )
             elif not self.conflict_columns:
                 engine = pg_hook.get_sqlalchemy_engine()
-                self.log.info(f'Appending DataFrame to Postgres table {table_name_full}')
+                self.log.info(
+                    f'Appending DataFrame to Postgres table {table_name_full}'
+                )
                 df_filtered.to_sql(
                     name=table_name_simple,
                     con=engine,

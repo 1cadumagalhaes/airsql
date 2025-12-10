@@ -98,7 +98,9 @@ class PostgresToBigQueryOperator(BaseOperator):
         pg_to_gcs.execute(context)
 
         if not self.dry_run:
-            self.log.info(f'Loading data from GCS to BigQuery: {self.destination_table}')
+            self.log.info(
+                f'Loading data from GCS to BigQuery: {self.destination_table}'
+            )
             # Build GCSToBigQueryOperator kwargs based on format
             gcs_to_bq_kwargs = {
                 'task_id': f'{self.task_id}_load',

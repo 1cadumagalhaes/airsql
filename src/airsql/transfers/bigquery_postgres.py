@@ -101,7 +101,9 @@ class BigQueryToPostgresOperator(BaseOperator):
             bq_to_gcs = BigQueryToGCSOperator(**bq_to_gcs_kwargs)
             bq_to_gcs.execute(context)
 
-            self.log.info(f'Loading data from GCS to PostgreSQL: {self.destination_table}')
+            self.log.info(
+                f'Loading data from GCS to PostgreSQL: {self.destination_table}'
+            )
         else:
             self.log.info(
                 f'[DRY RUN] Would extract data from BigQuery to GCS: gs://{self.gcs_bucket}/{self.gcs_temp_path}'

@@ -158,17 +158,19 @@ class SQLDecorators:
         output_table: Optional[Table] = None,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
+        dry_run: bool = False,
         **template_vars,
     ) -> Callable:
-        """
-        Decorator for SQL queries.
+        """Decorator for SQL queries.
 
         Args:
             output_table: Table to write results to (optional)
             source_conn: Connection ID for simple queries without table parameters
             sql_file: Path to SQL file (relative to sql_files_path)
-            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
-                            are passed as kwargs to the operator for dynamic task naming.
+            dry_run: If True, simulate the operation without writing data
+            **template_vars: Variables to pass to Jinja template. Non-Jinja
+                            variables are passed as kwargs to the operator for
+                            dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -190,6 +192,7 @@ class SQLDecorators:
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
+                    dry_run=dry_run,
                     **op_kwargs,
                 )
 
@@ -207,16 +210,16 @@ class SQLDecorators:
         dry_run: bool = False,
         **template_vars,
     ) -> Callable:
-        """
-        Decorator for SQL queries that append data to a destination table.
+        """Decorator for SQL queries that append data to a destination table.
 
         Args:
             output_table: Table to append data to
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
             dry_run: If True, simulate the operation without writing data
-            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
-                            are passed as kwargs to the operator for dynamic task naming.
+            **template_vars: Variables to pass to Jinja template. Non-Jinja
+                            variables are passed as kwargs to the operator for
+                            dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -227,7 +230,7 @@ class SQLDecorators:
                 )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
-                # Pass through extra template vars to operator for dynamic task naming
+                # Pass through extra template vars for dynamic task naming
                 op_kwargs.update(template_vars)
 
                 operator = SQLAppendOperator(
@@ -293,8 +296,7 @@ class SQLDecorators:
         dry_run: bool = False,
         **template_vars,
     ) -> Callable:
-        """
-        Decorator for SQL operations that replace table content.
+        """Decorator for SQL operations that replace table content.
 
         Args:
             output_table: Table to replace content in
@@ -302,8 +304,9 @@ class SQLDecorators:
             sql_file: Path to SQL file (relative to sql_files_path)
             method: Replace method - 'replace' (default) or 'truncate'
             dry_run: If True, simulate the operation without writing data
-            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
-                            are passed as kwargs to the operator for dynamic task naming.
+            **template_vars: Variables to pass to Jinja template. Non-Jinja
+                            variables are passed as kwargs to the operator for
+                            dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -314,7 +317,7 @@ class SQLDecorators:
                 )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
-                # Pass through extra template vars to operator for dynamic task naming
+                # Pass through extra template vars for dynamic task naming
                 op_kwargs.update(template_vars)
 
                 if method == 'truncate':
@@ -350,17 +353,19 @@ class SQLDecorators:
         dry_run: bool = False,
         **template_vars,
     ) -> Callable:
-        """
-        Decorator for SQL operations that truncate table content and insert new data,
-        preserving table structure and resetting sequences.
+        """Decorator for SQL operations that truncate table content and reload.
+
+        Truncates the table while preserving table structure and resetting
+        sequences.
 
         Args:
             output_table: Table to truncate and reload
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
             dry_run: If True, simulate the operation without writing data
-            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
-                            are passed as kwargs to the operator for dynamic task naming.
+            **template_vars: Variables to pass to Jinja template. Non-Jinja
+                            variables are passed as kwargs to the operator for
+                            dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -371,7 +376,7 @@ class SQLDecorators:
                 )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
-                # Pass through extra template vars to operator for dynamic task naming
+                # Pass through extra template vars for dynamic task naming
                 op_kwargs.update(template_vars)
 
                 operator = SQLTruncateOperator(
@@ -400,19 +405,20 @@ class SQLDecorators:
         dry_run: bool = False,
         **template_vars,
     ) -> Callable:
-        """
-        Decorator for SQL operations that merge/upsert into tables.
+        """Decorator for SQL operations that merge/upsert into tables.
 
         Args:
             output_table: Table to merge data into
             conflict_columns: Columns to use for conflict resolution (ON clause)
-            update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
+            update_columns: Columns to update on conflict (optional, defaults to
+                           all non-conflict columns)
             source_conn: Connection ID for the source database
             sql_file: Path to SQL file (relative to sql_files_path)
-            pre_truncate: If True, truncate the table before performing the merge
+            pre_truncate: If True, truncate the table before performing merge
             dry_run: If True, simulate the operation without writing data
-            **template_vars: Variables to pass to Jinja template. Non-Jinja variables
-                            are passed as kwargs to the operator for dynamic task naming.
+            **template_vars: Variables to pass to Jinja template. Non-Jinja
+                            variables are passed as kwargs to the operator for
+                            dynamic task naming.
         """
 
         def decorator(func: Callable) -> Callable:
@@ -423,7 +429,7 @@ class SQLDecorators:
                 )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
-                # Pass through extra template vars to operator for dynamic task naming
+                # Pass through extra template vars for dynamic task naming
                 op_kwargs.update(template_vars)
 
                 operator = SQLMergeOperator(
@@ -460,7 +466,8 @@ class SQLDecorators:
         Args:
             output_table: Table to write DataFrame to
             timestamp_column: Custom timestamp column name (optional)
-            if_exists: How to behave if table exists ('append', 'replace', 'truncate', 'fail')
+            if_exists: How to behave if table exists ('append', 'replace',
+                      'truncate', 'fail')
             dataframe: Pre-existing DataFrame to load (optional)
             dry_run: If True, simulate the operation without writing data
             **extra_kwargs: Extra keyword arguments for dynamic task naming and mapping
@@ -545,7 +552,8 @@ class SQLDecorators:
         Args:
             output_table: Table to merge DataFrame into
             conflict_columns: Columns to use for conflict resolution (ON clause)
-            update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
+            update_columns: Columns to update on conflict (optional, defaults to
+                           all non-conflict columns)
             timestamp_column: Custom timestamp column name (optional)
             dataframe: Pre-existing DataFrame to merge (optional)
             dry_run: If True, simulate the operation without writing data
@@ -625,11 +633,11 @@ class SQLDecorators:
         sql_file: Optional[str] = None,
         **template_vars,
     ) -> Callable:
-        """
-        Decorator for SQL data quality checks (for dbt tests).
+        """Decorator for SQL data quality checks (for dbt tests).
 
-        Uses Airflow's native SQLCheckOperator which expects SQL that returns a single row.
-        Each value is evaluated using Python bool casting - if any value is False, the check fails.
+        Uses Airflow's native SQLCheckOperator which expects SQL that returns a
+        single row. Each value is evaluated using Python bool casting - if any
+        value is False, the check fails.
 
         For dbt tests compatibility:
         - SQL returning 0 (or empty) = test passes
@@ -725,16 +733,17 @@ class SQLDecorators:
         dry_run: bool = False,
         **template_vars,
     ) -> Callable:
-        """
-        TaskFlow-compatible decorator that extracts data via SQL and merges it into a table.
+        """TaskFlow-compatible decorator that extracts data via SQL and merges.
 
-        Combines SQL extraction and DataFrame merge operations in a single task.
-        The decorated function should return SQL that extracts the data to be merged.
+        Combines SQL extraction and DataFrame merge operations in a single
+        task. The decorated function should return SQL that extracts data to
+        be merged.
 
         Args:
             output_table: Table to merge extracted data into
-            conflict_columns: Columns to use for conflict resolution (ON clause)
-            update_columns: Columns to update when conflict occurs (optional, defaults to all non-conflict columns)
+            conflict_columns: Columns to use for conflict resolution
+            update_columns: Columns to update on conflict (optional, defaults to
+                           all non-conflict columns)
             source_conn: Connection ID for the source database
             timestamp_column: Custom timestamp column name (optional)
             sql_file: Path to SQL file (relative to sql_files_path)
@@ -808,11 +817,11 @@ class SQLDecorators:
         dry_run: bool = False,
         **template_vars,
     ) -> Callable:
-        """
-        TaskFlow-compatible decorator that extracts data via SQL and loads it into a table.
+        """TaskFlow-compatible decorator that extracts data via SQL and loads.
 
         Combines SQL extraction and DataFrame load operations in a single task.
-        The decorated function should return SQL that extracts the data to be loaded.
+        The decorated function should return SQL that extracts data to be
+        loaded.
 
         Args:
             output_table: Table to load extracted data into

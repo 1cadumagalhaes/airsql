@@ -47,13 +47,20 @@ class SQLQueryOperator(BaseSQLOperator):
     """
 
     def __init__(
-        self, sql: str, output_table: Table, source_conn: Optional[str] = None, **kwargs
+        self,
+        sql: str,
+        output_table: Table,
+        source_conn: Optional[str] = None,
+        dry_run: bool = False,
+        **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
+        self.dry_run = dry_run
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and write to the output table."""
+        start_time = time.time()
         self.log.info(f'Executing SQL query to write to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
         if self.source_conn:
@@ -67,8 +74,27 @@ class SQLQueryOperator(BaseSQLOperator):
                     df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
                 finally:
                     conn.close()
-            self.log.info(f'Query returned {len(df)} rows')
-            self.hook_manager.write_dataframe_to_table(df, self.output_table)
+
+            duration = time.time() - start_time
+            summary = OperationSummary(
+                operation_type='query',
+                rows_extracted=len(df),
+                rows_loaded=len(df) if not self.dry_run else 0,
+                duration_seconds=duration,
+                format_used='parquet',
+                dry_run=self.dry_run,
+            )
+
+            if not self.dry_run:
+                self.log.info(f'Query returned {len(df)} rows')
+                self.hook_manager.write_dataframe_to_table(df, self.output_table)
+                self.log.info(f'Successfully wrote {len(df)} rows')
+            else:
+                self.log.info(
+                    f'[DRY RUN] Would write {len(df)} rows to {self.output_table}'
+                )
+
+            self.log.info(summary.to_log_summary())
         else:
             raise ValueError(
                 f'source_conn is required for {self.__class__.__name__}. '
@@ -149,6 +175,7 @@ class SQLDataFrameOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> pd.DataFrame:
         """Execute the SQL query and return a DataFrame."""
+        start_time = time.time()
         self.log.info('Executing SQL query to return DataFrame')
         self.log.debug(f'SQL Query: {self.sql}')
 
@@ -163,9 +190,19 @@ class SQLDataFrameOperator(BaseSQLOperator):
                     df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
                 finally:
                     conn.close()
+
+            duration = time.time() - start_time
+            summary = OperationSummary(
+                operation_type='dataframe',
+                rows_extracted=len(df),
+                duration_seconds=duration,
+                format_used='parquet',
+            )
+
             self.log.info(
                 f'Query returned DataFrame with {len(df)} rows and {len(df.columns)} columns'
             )
+            self.log.info(summary.to_log_summary())
             return df
         else:
             raise ValueError(
@@ -361,10 +398,14 @@ class SQLMergeOperator(BaseSQLOperator):
 
             if not self.dry_run:
                 if self.pre_truncate:
-                    self.log.info(f'Pre-truncating table {self.output_table} before merge')
+                    self.log.info(
+                        f'Pre-truncating table {self.output_table} before merge'
+                    )
                     # Create an empty DataFrame with the same structure for truncation
                     empty_df = df.iloc[0:0].copy()
-                    self.hook_manager.truncate_table_content(empty_df, self.output_table)
+                    self.hook_manager.truncate_table_content(
+                        empty_df, self.output_table
+                    )
 
                 self.log.info(f'Query returned {len(df)} rows, merging into table')
                 self.hook_manager.merge_dataframe_to_table(
