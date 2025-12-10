@@ -369,7 +369,7 @@ class SQLHookManager:
         )
 
     @staticmethod
-    def _merge_bigquery_table(
+    def _merge_bigquery_table(  # noqa: PLR0914
         df: pd.DataFrame,
         table: Table,
         conflict_columns: List[str],
