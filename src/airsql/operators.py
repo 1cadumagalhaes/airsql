@@ -21,22 +21,26 @@ from airsql.utils import OperationSummary
 class BaseSQLOperator(BaseOperator):
     """Base class for SQL operators.
 
-    Supports arbitrary extra arguments for dynamic task naming and mapping.
-    Any kwargs not recognized by BaseOperator are stored as instance attributes.
+    Supports dynamic task mapping through the dynamic_params parameter.
+    Parameters in dynamic_params are stored as instance attributes for use in map_index_template.
     """
 
-    def __init__(self, sql: str, source_conn: Optional[str] = None, **kwargs):
-        # Extract operator-specific params that BaseOperator recognizes
-        # Store all other kwargs as instance attributes for dynamic task usage
+    def __init__(
+        self,
+        sql: str,
+        source_conn: Optional[str] = None,
+        dynamic_params: Optional[dict] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.sql = sql
         self.source_conn = source_conn
         self.hook_manager = SQLHookManager()
 
-        # Store extra kwargs as instance attributes for task mapping
-        # This enables use with partial().expand_kwargs() for dynamic tasks
-        for key, value in kwargs.items():
-            if not hasattr(self, key):
+        # Store dynamic parameters as instance attributes for map_index_template
+        # This enables use with partial().expand_kwargs() for dynamic task naming
+        if dynamic_params:
+            for key, value in dynamic_params.items():
                 setattr(self, key, value)
 
 
