@@ -2,14 +2,13 @@
 Operator to transfer data from PostgreSQL to Google Cloud Storage.
 """
 
+import json
 import time
 import warnings
-import json
 from io import BytesIO, StringIO
-from typing import Optional, Sequence, List, Dict
+from typing import Dict, List, Optional, Sequence
 
 import pyarrow as pa
-
 from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -71,21 +70,21 @@ def _pa_table_to_bq_schema(
             pg_info = postgres_type_map[name]
             pg_typname = pg_info.get('typname')
             # json/jsonb -> JSON
-            if pg_typname in ('json', 'jsonb'):
+            if pg_typname in {'json', 'jsonb'}:
                 return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
             # arrays: typname starting with '_' or typelem provided
             if pg_info.get('is_array'):
                 # map element type
                 elem_typname = pg_info.get('element_typname')
                 # if element is composite/record treat as RECORD REPEATED
-                if elem_typname and elem_typname not in (
+                if elem_typname and elem_typname not in {
                     'int4',
                     'text',
                     'varchar',
                     'numeric',
                     'json',
                     'jsonb',
-                ):
+                }:
                     return {'name': name, 'type': 'RECORD', 'mode': 'REPEATED'}
                 # otherwise map using simple mapping
                 mapped = _simple_type(typ)
@@ -119,13 +118,12 @@ def _pa_table_to_bq_schema(
                             json.loads(val)
                             success += 1
                         except Exception:
-                            pass
+                            print('Value in column %s is not valid JSON: %s', name, val)
 
                     if total > 0 and (success / total) >= threshold:
                         return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
-            except Exception:
-                # best-effort only — fall back to STRING on any issues
-                pass
+            except Exception as e:
+                print('Failed to sample/detect JSON for column %s: %s', name, e)
 
         return {'name': name, 'type': bq_type, 'mode': 'NULLABLE'}
 
