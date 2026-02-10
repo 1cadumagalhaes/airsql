@@ -8,6 +8,7 @@ import warnings
 from io import BytesIO, StringIO
 from typing import Dict, List, Optional, Sequence
 
+import pandas as pd
 import pyarrow as pa
 from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
@@ -151,6 +152,9 @@ def _pa_table_to_bq_schema(
             return 'BYTES'
         if pa.types.is_decimal(typ):
             return 'NUMERIC'
+        # BigQuery doesn't support JSON type in Parquet loads, convert to STRING
+        if pa.types.is_struct(typ):
+            return 'STRING'
         # Fallback for complex/unrecognized types (maps, dictionaries, etc.)
         # Represent as STRING to avoid load failures; user can refine schema later
         return 'STRING'
@@ -234,10 +238,57 @@ class PostgresToGCSOperator(BaseOperator):
         self.sampling_threshold = sampling_threshold
         self.dry_run = dry_run
 
-        if self.export_format not in {'csv', 'parquet'}:
+        if self.export_format not in {'csv', 'parquet', 'jsonl'}:
             raise ValueError(
-                f"Unsupported format: {self.export_format}. Must be 'csv' or 'parquet'."
+                f"Unsupported format: {self.export_format}. Must be 'csv', 'parquet', or 'jsonl'."
             )
+
+    def _detect_json_columns(self, df, pg_hook) -> set:
+        """Detect JSON/JSONB columns from the source PostgreSQL query.
+
+        Returns a set of column names that are JSON/JSONB type.
+        """
+        json_columns = set()
+        try:
+            type_query = f'SELECT * FROM ({self.sql}) AS subquery LIMIT 0'  # noqa: S608
+            conn = pg_hook.get_conn()
+            cur = conn.cursor()
+            cur.execute(type_query)
+            desc = cur.description
+            col_names = [d[0] for d in desc]
+
+            for i, d in enumerate(desc):
+                type_oid = d[1]
+                cur2 = conn.cursor()
+                cur2.execute(
+                    'SELECT typname FROM pg_type WHERE oid = %s',
+                    (type_oid,),
+                )
+                row = cur2.fetchone()
+                if row and row[0] in {'json', 'jsonb'}:
+                    json_columns.add(col_names[i])
+                cur2.close()
+            cur.close()
+        except Exception as e:
+            self.log.warning(f'Failed to detect JSON columns: {e}')
+
+        return json_columns
+
+    def _fix_timestamp_precision(self, df):
+        """Fix timestamp precision to avoid TIMESTAMP_NANOS errors in BigQuery.
+
+        BigQuery Parquet loader only supports TIMESTAMP_MILLIS and TIMESTAMP_MICROS.
+        This method casts nanosecond timestamps to microsecond precision.
+        """
+        try:
+            for col in df.columns:
+                if pd.api.types.is_datetime64_any_dtype(df[col]):
+                    # Cast to microsecond precision
+                    df[col] = df[col].dt.round('us')
+        except Exception as e:
+            self.log.warning(f'Failed to fix timestamp precision: {e}')
+
+        return df
 
     def execute(self, context) -> str:
         start_time = time.time()
@@ -256,6 +307,19 @@ class PostgresToGCSOperator(BaseOperator):
 
         self.log.info(f'Extracted {len(df)} rows from Postgres.')
 
+        # Detect JSON columns and adjust export format if needed
+        json_columns = self._detect_json_columns(df, pg_hook)
+        export_format = self.export_format
+        if json_columns and self.export_format == 'parquet':
+            self.log.info(
+                f'Detected JSON columns: {json_columns}. Switching to JSONL format.'
+            )
+            export_format = 'jsonl'
+
+        # Fix timestamp precision: cast nanosecond timestamps to microsecond precision
+        # BigQuery Parquet loader doesn't support TIMESTAMP_NANOS
+        df = self._fix_timestamp_precision(df)
+
         # Validate DataFrame
         validation_result = DataValidator.validate_row_count(df, min_rows=1)
         if validation_result.errors:
@@ -264,13 +328,19 @@ class PostgresToGCSOperator(BaseOperator):
         for warning in validation_result.warnings:
             self.log.warning(f'Validation warning: {warning}')
 
-        if self.export_format == 'csv':
+        if export_format == 'csv':
             csv_kwargs = {'index': False, **self.csv_kwargs}
             data_buffer = StringIO()
             df.to_csv(data_buffer, **csv_kwargs)
             data_bytes = data_buffer.getvalue().encode('utf-8')
             mime_type = 'text/csv'
-        elif self.export_format == 'parquet':
+        elif export_format == 'jsonl':
+            # Convert DataFrame to JSONL format using pandas native support
+            data_buffer = StringIO()
+            df.to_json(data_buffer, orient='records', lines=True)
+            data_bytes = data_buffer.getvalue().encode('utf-8')
+            mime_type = 'application/x-ndjson'
+        elif export_format == 'parquet':
             # PyArrow is the default and optimal engine for parquet with PyArrow-backed DataFrames
             parquet_kwargs = {
                 'index': False,
@@ -283,7 +353,8 @@ class PostgresToGCSOperator(BaseOperator):
             mime_type = 'application/octet-stream'
 
         # If requested, generate and upload a BigQuery-compatible schema JSON
-        if self.schema_filename:
+        # Schema generation is only for Parquet format, not JSONL (BigQuery auto-detects JSONL)
+        if self.schema_filename and export_format == 'parquet':
             try:
                 self.log.info(
                     'Generating BigQuery schema file: %s', self.schema_filename
@@ -364,14 +435,14 @@ class PostgresToGCSOperator(BaseOperator):
             rows_loaded=len(df) if not self.dry_run else 0,
             duration_seconds=duration,
             file_size_mb=len(data_bytes) / (1024 * 1024),
-            format_used=self.export_format,
+            format_used=export_format,
             validation_errors=validation_result.errors,
             validation_warnings=validation_result.warnings,
             dry_run=self.dry_run,
         )
         if not self.dry_run:
             self.log.info(
-                f'Uploading data as {self.export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
+                f'Uploading data as {export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
             )
             gcs_hook.upload(
                 bucket_name=self.bucket,
@@ -382,7 +453,7 @@ class PostgresToGCSOperator(BaseOperator):
             self.log.info('Upload complete.')
         else:
             self.log.info(
-                f'[DRY RUN] Would upload {len(df)} rows as {self.export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
+                f'[DRY RUN] Would upload {len(df)} rows as {export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
             )
 
         self.log.info(summary.to_log_summary())

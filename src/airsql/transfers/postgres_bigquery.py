@@ -6,14 +6,20 @@ and asset emission.
 from typing import Any, Optional
 
 from airflow.models import BaseOperator
+from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import (
     GCSToBigQueryOperator,
 )
 from airflow.sdk import Asset, Context
+from google.cloud import bigquery
 
 from airsql.sensors.postgres import PostgresSqlSensor
 from airsql.transfers.postgres_gcs import PostgresToGCSOperator
+
+# Constants for destination table parsing
+_FULL_TABLE_PARTS = 3  # project.dataset.table
+_PARTIAL_TABLE_PARTS = 2  # dataset.table
 
 
 class PostgresToBigQueryOperator(BaseOperator):
@@ -59,7 +65,12 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.export_format = export_format.lower()
         self.schema_filename = schema_filename
         # Generate temp path with appropriate extension
-        file_ext = '.parquet' if self.export_format == 'parquet' else '.csv'
+        if self.export_format == 'parquet':
+            file_ext = '.parquet'
+        elif self.export_format == 'jsonl':
+            file_ext = '.jsonl'
+        else:
+            file_ext = '.csv'
         self.gcs_temp_path = (
             gcs_temp_path or f'temp/postgres_to_bq/{self.task_id}/data{file_ext}'
         )
@@ -111,6 +122,10 @@ class PostgresToBigQueryOperator(BaseOperator):
             self.log.info(
                 f'Loading data from GCS to BigQuery: {self.destination_table}'
             )
+
+            # Ensure destination dataset exists before loading
+            self._ensure_bigquery_dataset()
+
             # Build GCSToBigQueryOperator kwargs based on format
             gcs_to_bq_kwargs = {
                 'task_id': f'{self.task_id}_load',
@@ -120,18 +135,23 @@ class PostgresToBigQueryOperator(BaseOperator):
                 'gcp_conn_id': self.gcp_conn_id,
                 'write_disposition': self.write_disposition,
                 'create_disposition': self.create_disposition,
-                'source_format': self.export_format.upper(),
             }
-            # Only add skip_leading_rows for CSV format
-            if self.export_format == 'csv':
-                gcs_to_bq_kwargs['skip_leading_rows'] = 1
 
-            # If we generated a schema file for parquet, pass it to BigQuery operator
-            if self.export_format == 'parquet' and derived_schema_name:
-                gcs_to_bq_kwargs['schema_object'] = derived_schema_name
-                gcs_to_bq_kwargs['schema_object_bucket'] = self.gcs_bucket
-                # Prefer explicit schema over autodetect to preserve types
-                gcs_to_bq_kwargs['autodetect'] = False
+            if self.export_format == 'csv':
+                gcs_to_bq_kwargs['source_format'] = 'CSV'
+                gcs_to_bq_kwargs['skip_leading_rows'] = 1
+            elif self.export_format == 'jsonl':
+                gcs_to_bq_kwargs['source_format'] = 'NEWLINE_DELIMITED_JSON'
+                # BigQuery auto-detects schema for JSONL
+                gcs_to_bq_kwargs['autodetect'] = True
+            else:  # parquet
+                gcs_to_bq_kwargs['source_format'] = 'PARQUET'
+                # If we generated a schema file for parquet, pass it to BigQuery operator
+                if derived_schema_name:
+                    gcs_to_bq_kwargs['schema_object'] = derived_schema_name
+                    gcs_to_bq_kwargs['schema_object_bucket'] = self.gcs_bucket
+                    # Prefer explicit schema over autodetect to preserve types
+                    gcs_to_bq_kwargs['autodetect'] = False
 
             gcs_to_bq = GCSToBigQueryOperator(**gcs_to_bq_kwargs)
             gcs_to_bq.execute(context)
@@ -179,3 +199,41 @@ class PostgresToBigQueryOperator(BaseOperator):
             self.log.info('Temporary file cleanup completed')
         except Exception as e:
             self.log.warning(f'Failed to cleanup temporary file: {e}')
+
+    def _ensure_bigquery_dataset(self) -> None:
+        """Ensure the destination BigQuery dataset exists, creating if necessary."""
+        try:
+            # Parse project_id, dataset_id from destination_table
+            # Format: project.dataset.table or dataset.table
+            parts = self.destination_table.split('.')
+
+            if len(parts) == _FULL_TABLE_PARTS:
+                project_id, dataset_id, _ = parts
+            elif len(parts) == _PARTIAL_TABLE_PARTS:
+                dataset_id, _ = parts
+                # Get project_id from BigQuery hook
+                bq_hook = BigQueryHook(
+                    gcp_conn_id=self.gcp_conn_id, use_legacy_sql=False
+                )
+                project_id = bq_hook.project_id
+            else:
+                self.log.warning(
+                    f'Could not parse destination table: {self.destination_table}. '
+                    'Expected format: [project.]dataset.table'
+                )
+                return
+
+            bq_hook = BigQueryHook(gcp_conn_id=self.gcp_conn_id, use_legacy_sql=False)
+
+            # Create dataset if it doesn't exist using exists_ok parameter
+            dataset = bigquery.Dataset(f'{project_id}.{dataset_id}')
+            dataset.location = 'US'  # Default location; can be customized
+
+            self.log.info(
+                f'Ensuring BigQuery dataset exists: {project_id}.{dataset_id}'
+            )
+            bq_hook.get_conn().create_dataset(dataset, exists_ok=True)
+            self.log.info(f'BigQuery dataset ready: {project_id}.{dataset_id}')
+        except Exception as e:
+            self.log.error(f'Failed to ensure BigQuery dataset exists: {e}')
+            raise
