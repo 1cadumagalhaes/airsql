@@ -40,6 +40,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         gcs_bucket: str,
         gcs_temp_path: Optional[str] = None,
         export_format: str = 'parquet',
+        schema_filename: Optional[str] = None,
         check_source_exists: bool = True,
         source_table_check_sql: Optional[str] = None,
         write_disposition: str = 'WRITE_TRUNCATE',
@@ -56,6 +57,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.gcp_conn_id = gcp_conn_id
         self.gcs_bucket = gcs_bucket
         self.export_format = export_format.lower()
+        self.schema_filename = schema_filename
         # Generate temp path with appropriate extension
         file_ext = '.parquet' if self.export_format == 'parquet' else '.csv'
         self.gcs_temp_path = (
@@ -85,6 +87,13 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.log.info(
             f'Extracting data from PostgreSQL to GCS: gs://{self.gcs_bucket}/{self.gcs_temp_path}'
         )
+        # Choose schema filename: prefer user-provided, else derive from temp path
+        derived_schema_name = self.schema_filename or (
+            (self.gcs_temp_path + '.schema.json')
+            if self.export_format == 'parquet'
+            else None
+        )
+
         pg_to_gcs = PostgresToGCSOperator(
             task_id=f'{self.task_id}_extract',
             postgres_conn_id=self.postgres_conn_id,
@@ -93,6 +102,7 @@ class PostgresToBigQueryOperator(BaseOperator):
             filename=self.gcs_temp_path,
             gcp_conn_id=self.gcp_conn_id,
             export_format=self.export_format,
+            schema_filename=derived_schema_name,
             dry_run=self.dry_run,
         )
         pg_to_gcs.execute(context)
@@ -115,6 +125,13 @@ class PostgresToBigQueryOperator(BaseOperator):
             # Only add skip_leading_rows for CSV format
             if self.export_format == 'csv':
                 gcs_to_bq_kwargs['skip_leading_rows'] = 1
+
+            # If we generated a schema file for parquet, pass it to BigQuery operator
+            if self.export_format == 'parquet' and derived_schema_name:
+                gcs_to_bq_kwargs['schema_object'] = derived_schema_name
+                gcs_to_bq_kwargs['schema_object_bucket'] = self.gcs_bucket
+                # Prefer explicit schema over autodetect to preserve types
+                gcs_to_bq_kwargs['autodetect'] = False
 
             gcs_to_bq = GCSToBigQueryOperator(**gcs_to_bq_kwargs)
             gcs_to_bq.execute(context)

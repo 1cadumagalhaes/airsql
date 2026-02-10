@@ -4,14 +4,161 @@ Operator to transfer data from PostgreSQL to Google Cloud Storage.
 
 import time
 import warnings
+import json
 from io import BytesIO, StringIO
-from typing import Optional, Sequence
+from typing import Optional, Sequence, List, Dict
+
+import pyarrow as pa
 
 from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from airsql.utils import DataValidator, OperationSummary
+
+
+def _pa_table_to_bq_schema(
+    df,
+    detect_json: bool = False,
+    sample_size: int = 100,
+    threshold: float = 0.9,
+    postgres_type_map: Optional[Dict[str, Dict]] = None,
+) -> List[Dict]:
+    """Convert a pandas (pyarrow-backed) DataFrame or pyarrow.Table to BigQuery schema.
+
+    Returns a list of dicts compatible with BigQuery load schema JSON: [{"name":..., "type":..., "mode":..., "fields": [...]}, ...]
+    """
+    # Ensure we have a pyarrow.Table
+    if isinstance(df, pa.Table):
+        table = df
+    else:
+        # from_pandas will convert pandas with pyarrow backend nicely
+        table = pa.Table.from_pandas(df, preserve_index=False)
+
+    def _field_to_bq(field: pa.Field) -> Dict:
+        name = field.name
+        typ = field.type
+
+        # LIST / REPEATED
+        if pa.types.is_list(typ) or pa.types.is_large_list(typ):
+            value_type = typ.value_type
+            # nested list of structs -> RECORD REPEATED
+            if pa.types.is_struct(value_type):
+                fields = [_field_to_bq(sub) for sub in value_type]
+                return {
+                    'name': name,
+                    'type': 'RECORD',
+                    'mode': 'REPEATED',
+                    'fields': fields,
+                }
+            else:
+                mapped = _simple_type(value_type)
+                return {'name': name, 'type': mapped, 'mode': 'REPEATED'}
+
+        # STRUCT / RECORD
+        if pa.types.is_struct(typ):
+            fields = [_field_to_bq(sub) for sub in typ]
+            return {
+                'name': name,
+                'type': 'RECORD',
+                'mode': 'NULLABLE',
+                'fields': fields,
+            }
+
+        # SIMPLE TYPES
+        # If we have Postgres metadata for this column, prefer it
+        if postgres_type_map and name in postgres_type_map:
+            pg_info = postgres_type_map[name]
+            pg_typname = pg_info.get('typname')
+            # json/jsonb -> JSON
+            if pg_typname in ('json', 'jsonb'):
+                return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
+            # arrays: typname starting with '_' or typelem provided
+            if pg_info.get('is_array'):
+                # map element type
+                elem_typname = pg_info.get('element_typname')
+                # if element is composite/record treat as RECORD REPEATED
+                if elem_typname and elem_typname not in (
+                    'int4',
+                    'text',
+                    'varchar',
+                    'numeric',
+                    'json',
+                    'jsonb',
+                ):
+                    return {'name': name, 'type': 'RECORD', 'mode': 'REPEATED'}
+                # otherwise map using simple mapping
+                mapped = _simple_type(typ)
+                return {'name': name, 'type': mapped, 'mode': 'REPEATED'}
+
+        bq_type = _simple_type(typ)
+
+        # Optional JSON detection for string-backed fields (sampling)
+        if detect_json and bq_type == 'STRING':
+            try:
+                # Try to sample values from the pyarrow column
+                arr = table.column(name)
+                non_null_indices = [i for i in range(len(arr)) if not arr.is_null(i)]
+                if non_null_indices:
+                    # sample up to sample_size indices evenly/randomly
+                    if len(non_null_indices) <= sample_size:
+                        sample_idx = non_null_indices
+                    else:
+                        # pick uniformly distributed sample indices for large arrays
+                        step = max(1, len(non_null_indices) // sample_size)
+                        sample_idx = non_null_indices[::step][:sample_size]
+
+                    success = 0
+                    total = 0
+                    for i in sample_idx:
+                        val = arr[i].as_py()
+                        if val is None:
+                            continue
+                        total += 1
+                        try:
+                            json.loads(val)
+                            success += 1
+                        except Exception:
+                            pass
+
+                    if total > 0 and (success / total) >= threshold:
+                        return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
+            except Exception:
+                # best-effort only — fall back to STRING on any issues
+                pass
+
+        return {'name': name, 'type': bq_type, 'mode': 'NULLABLE'}
+
+    def _simple_type(typ) -> str:
+        # Map pyarrow types to BigQuery types
+        if (
+            pa.types.is_string(typ)
+            or pa.types.is_large_string(typ)
+            or pa.types.is_unicode(typ)
+        ):
+            return 'STRING'
+        if pa.types.is_integer(typ) or pa.types.is_unsigned_integer(typ):
+            return 'INTEGER'
+        if pa.types.is_floating(typ):
+            return 'FLOAT'
+        if pa.types.is_boolean(typ):
+            return 'BOOLEAN'
+        if pa.types.is_timestamp(typ):
+            return 'TIMESTAMP'
+        if pa.types.is_date(typ):
+            return 'DATE'
+        if pa.types.is_time(typ):
+            return 'TIME'
+        if pa.types.is_binary(typ) or pa.types.is_large_binary(typ):
+            return 'BYTES'
+        if pa.types.is_decimal(typ):
+            return 'NUMERIC'
+        # Fallback for complex/unrecognized types (maps, dictionaries, etc.)
+        # Represent as STRING to avoid load failures; user can refine schema later
+        return 'STRING'
+
+    schema = [_field_to_bq(f) for f in table.schema]
+    return schema
 
 
 class PostgresToGCSOperator(BaseOperator):
@@ -65,6 +212,11 @@ class PostgresToGCSOperator(BaseOperator):
         pandas_chunksize: Optional[int] = None,
         csv_kwargs: Optional[dict] = None,
         parquet_kwargs: Optional[dict] = None,
+        # How to detect JSON/complex types for schema generation.
+        # Options: 'postgres' (use Postgres metadata), 'sampling' (sample values), 'none' (no JSON detection)
+        schema_detection_mode: str = 'postgres',
+        sampling_size: int = 100,
+        sampling_threshold: float = 0.9,
         dry_run: bool = False,
         **kwargs,
     ) -> None:
@@ -79,6 +231,9 @@ class PostgresToGCSOperator(BaseOperator):
         self.pandas_chunksize = pandas_chunksize
         self.csv_kwargs = csv_kwargs or {}
         self.parquet_kwargs = parquet_kwargs or {}
+        self.schema_detection_mode = schema_detection_mode
+        self.sampling_size = sampling_size
+        self.sampling_threshold = sampling_threshold
         self.dry_run = dry_run
 
         if self.export_format not in {'csv', 'parquet'}:
@@ -129,6 +284,81 @@ class PostgresToGCSOperator(BaseOperator):
             data_bytes = data_buffer.getvalue()
             mime_type = 'application/octet-stream'
 
+        # If requested, generate and upload a BigQuery-compatible schema JSON
+        if self.schema_filename:
+            try:
+                self.log.info(
+                    'Generating BigQuery schema file: %s', self.schema_filename
+                )
+                # Determine Postgres metadata mapping for columns if available
+                postgres_type_map = None
+                try:
+                    # Use a helper query to obtain column types for the SQL used.
+                    # We try to build a temporary query that uses the original SQL as subquery
+                    # and inspects its columns using pg_type and information_schema.
+                    # This is a best-effort approach and may be skipped if the SQL is complex.
+                    type_query = f'SELECT * FROM ({self.sql}) AS subquery LIMIT 0'  # noqa: S608
+                    conn = pg_hook.get_conn()
+                    cur = conn.cursor()
+                    cur.execute(type_query)
+                    # cursor.description provides type_code; map via pg_type
+                    desc = cur.description
+                    col_names = [d[0] for d in desc]
+                    postgres_type_map = {}
+                    for i, d in enumerate(desc):
+                        # d[1] is type_code per DB-API
+                        type_oid = d[1]
+                        # Query pg_type to get name and array/elem info
+                        cur2 = conn.cursor()
+                        cur2.execute(
+                            'SELECT typname, typtype, typelem, typcategory FROM pg_type WHERE oid = %s',
+                            (type_oid,),
+                        )
+                        row = cur2.fetchone()
+                        if row:
+                            typname = row[0]
+                            typelem = row[2]
+                            is_array = typelem != 0
+                            elem_name = None
+                            if is_array:
+                                cur3 = conn.cursor()
+                                cur3.execute(
+                                    'SELECT typname FROM pg_type WHERE oid = %s',
+                                    (typelem,),
+                                )
+                                er = cur3.fetchone()
+                                elem_name = er[0] if er else None
+                            postgres_type_map[col_names[i]] = {
+                                'typname': typname,
+                                'is_array': is_array,
+                                'element_typname': elem_name,
+                            }
+                        cur2.close()
+                    cur.close()
+                except Exception:
+                    postgres_type_map = None
+
+                schema_fields = _pa_table_to_bq_schema(
+                    df, detect_json=False, postgres_type_map=postgres_type_map
+                )
+                gcs_hook.upload(
+                    bucket_name=self.bucket,
+                    object_name=self.schema_filename,
+                    data=json.dumps(schema_fields).encode('utf-8'),
+                    mime_type='application/json',
+                )
+                self.log.info(
+                    'Schema file uploaded to gs://%s/%s',
+                    self.bucket,
+                    self.schema_filename,
+                )
+            except Exception as e:
+                warnings.warn(
+                    f'Failed to generate/upload schema file {self.schema_filename}: {e}',
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         duration = time.time() - start_time
         summary = OperationSummary(
             operation_type='export',
@@ -141,7 +371,6 @@ class PostgresToGCSOperator(BaseOperator):
             validation_warnings=validation_result.warnings,
             dry_run=self.dry_run,
         )
-
         if not self.dry_run:
             self.log.info(
                 f'Uploading data as {self.export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
@@ -153,14 +382,6 @@ class PostgresToGCSOperator(BaseOperator):
                 mime_type=mime_type,
             )
             self.log.info('Upload complete.')
-
-            # TODO: Implement schema_filename upload if needed
-            if self.schema_filename:
-                warnings.warn(
-                    'Schema file upload is not yet implemented in PostgresToGCSOperator.',
-                    UserWarning,
-                    stacklevel=2,
-                )
         else:
             self.log.info(
                 f'[DRY RUN] Would upload {len(df)} rows as {self.export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
