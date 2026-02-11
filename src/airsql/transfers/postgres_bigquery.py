@@ -10,6 +10,7 @@ from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import (
     GCSToBigQueryOperator,
 )
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import Asset, Context
 
 from airsql.sensors.postgres import PostgresSqlSensor
@@ -84,6 +85,37 @@ class PostgresToBigQueryOperator(BaseOperator):
         if self.emit_asset:
             self.outlets = [Asset(f'airsql://database/{self.destination_table}')]
 
+    def _detect_json_columns(self, pg_hook: PostgresHook) -> set:
+        """Detect JSON/JSONB columns from the source PostgreSQL query.
+
+        Returns a set of column names that are JSON/JSONB type.
+        """
+        json_columns = set()
+        try:
+            type_query = f'SELECT * FROM ({self.sql}) AS subquery LIMIT 0'  # noqa: S608
+            conn = pg_hook.get_conn()
+            cur = conn.cursor()
+            cur.execute(type_query)
+            desc = cur.description
+            col_names = [d[0] for d in desc]
+
+            for i, d in enumerate(desc):
+                type_oid = d[1]
+                cur2 = conn.cursor()
+                cur2.execute(
+                    'SELECT typname FROM pg_type WHERE oid = %s',
+                    (type_oid,),
+                )
+                row = cur2.fetchone()
+                if row and row[0] in {'json', 'jsonb'}:
+                    json_columns.add(col_names[i])
+                cur2.close()
+            cur.close()
+        except Exception as e:
+            self.log.warning(f'Failed to detect JSON columns: {e}')
+
+        return json_columns
+
     def execute(self, context: Context) -> Any:
         """Execute the PostgreSQL to BigQuery transfer."""
 
@@ -93,14 +125,30 @@ class PostgresToBigQueryOperator(BaseOperator):
         if self.check_source_exists:
             self._check_source_data(context)
 
-        self.log.info(
-            f'Extracting data from PostgreSQL to GCS: gs://{self.gcs_bucket}/{self.gcs_temp_path}'
-        )
-        # Choose schema filename: prefer user-provided, else derive from temp path
-        derived_schema_name = self.schema_filename or (
+        # Detect JSON columns and adjust format if needed
+        actual_export_format = self.export_format
+        actual_gcs_temp_path = self.gcs_temp_path
+        actual_schema_filename = self.schema_filename or (
             (self.gcs_temp_path + '.schema.json')
             if self.export_format == 'parquet'
             else None
+        )
+
+        if self.export_format == 'parquet':
+            pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
+            json_columns = self._detect_json_columns(pg_hook)
+            if json_columns:
+                self.log.info(
+                    f'Detected JSON columns: {json_columns}. Switching to JSONL format.'
+                )
+                actual_export_format = 'jsonl'
+                # Change file extension from .parquet to .jsonl
+                actual_gcs_temp_path = self.gcs_temp_path.replace('.parquet', '.jsonl')
+                # JSONL doesn't need schema file
+                actual_schema_filename = None
+
+        self.log.info(
+            f'Extracting data from PostgreSQL to GCS: gs://{self.gcs_bucket}/{actual_gcs_temp_path}'
         )
 
         pg_to_gcs = PostgresToGCSOperator(
@@ -108,10 +156,10 @@ class PostgresToBigQueryOperator(BaseOperator):
             postgres_conn_id=self.postgres_conn_id,
             sql=self.sql,
             bucket=self.gcs_bucket,
-            filename=self.gcs_temp_path,
+            filename=actual_gcs_temp_path,
             gcp_conn_id=self.gcp_conn_id,
-            export_format=self.export_format,
-            schema_filename=derived_schema_name,
+            export_format=actual_export_format,
+            schema_filename=actual_schema_filename,
             dry_run=self.dry_run,
         )
         pg_to_gcs.execute(context)
@@ -124,29 +172,29 @@ class PostgresToBigQueryOperator(BaseOperator):
             # Ensure destination dataset exists before loading
             self._ensure_bigquery_dataset()
 
-            # Build GCSToBigQueryOperator kwargs based on format
+            # Build GCSToBigQueryOperator kwargs based on actual format
             gcs_to_bq_kwargs = {
                 'task_id': f'{self.task_id}_load',
                 'bucket': self.gcs_bucket,
-                'source_objects': [self.gcs_temp_path],
+                'source_objects': [actual_gcs_temp_path],
                 'destination_project_dataset_table': self.destination_table,
                 'gcp_conn_id': self.gcp_conn_id,
                 'write_disposition': self.write_disposition,
                 'create_disposition': self.create_disposition,
             }
 
-            if self.export_format == 'csv':
+            if actual_export_format == 'csv':
                 gcs_to_bq_kwargs['source_format'] = 'CSV'
                 gcs_to_bq_kwargs['skip_leading_rows'] = 1
-            elif self.export_format == 'jsonl':
+            elif actual_export_format == 'jsonl':
                 gcs_to_bq_kwargs['source_format'] = 'NEWLINE_DELIMITED_JSON'
                 # BigQuery auto-detects schema for JSONL
                 gcs_to_bq_kwargs['autodetect'] = True
             else:  # parquet
                 gcs_to_bq_kwargs['source_format'] = 'PARQUET'
-                # If we generated a schema file for parquet, pass it to BigQuery operator
-                if derived_schema_name:
-                    gcs_to_bq_kwargs['schema_object'] = derived_schema_name
+                # If we have a schema file for parquet, pass it to BigQuery operator
+                if actual_schema_filename:
+                    gcs_to_bq_kwargs['schema_object'] = actual_schema_filename
                     gcs_to_bq_kwargs['schema_object_bucket'] = self.gcs_bucket
                     # Prefer explicit schema over autodetect to preserve types
                     gcs_to_bq_kwargs['autodetect'] = False
@@ -155,7 +203,7 @@ class PostgresToBigQueryOperator(BaseOperator):
             gcs_to_bq.execute(context)
 
             if self.cleanup_temp_files:
-                self._cleanup_temp_files()
+                self._cleanup_temp_files(actual_gcs_temp_path)
 
             self.log.info(
                 f'Successfully transferred data from PostgreSQL to BigQuery table: {self.destination_table}'
@@ -186,14 +234,19 @@ class PostgresToBigQueryOperator(BaseOperator):
         sensor.execute(context)
         self.log.info('Source data validation successful')
 
-    def _cleanup_temp_files(self) -> None:
-        """Clean up temporary files from GCS."""
+    def _cleanup_temp_files(self, temp_path: Optional[str] = None) -> None:
+        """Clean up temporary files from GCS.
+
+        Args:
+            temp_path: The path to clean up. If not provided, uses self.gcs_temp_path.
+        """
+        cleanup_path = temp_path or self.gcs_temp_path
         try:
             self.log.info(
-                f'Cleaning up temporary file: gs://{self.gcs_bucket}/{self.gcs_temp_path}'
+                f'Cleaning up temporary file: gs://{self.gcs_bucket}/{cleanup_path}'
             )
             gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
-            gcs_hook.delete(bucket_name=self.gcs_bucket, object_name=self.gcs_temp_path)
+            gcs_hook.delete(bucket_name=self.gcs_bucket, object_name=cleanup_path)
             self.log.info('Temporary file cleanup completed')
         except Exception as e:
             self.log.warning(f'Failed to cleanup temporary file: {e}')
