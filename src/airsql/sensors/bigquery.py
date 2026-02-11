@@ -1,6 +1,5 @@
 from airflow.exceptions import AirflowSkipException
 from airflow.providers.common.sql.sensors.sql import SqlSensor
-from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 
 
 class BigQuerySqlSensor(SqlSensor):
@@ -17,7 +16,11 @@ class BigQuerySqlSensor(SqlSensor):
             raise AirflowSkipException('Skipping task because poke returned False.')
         return super_poke
 
-    def _get_hook(self, location='us-central1') -> BigQueryHook:
+    def _get_hook(self, location='us-central1'):
+        from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
+            BigQueryHook,  # noqa: PLC0415
+        )
+
         return BigQueryHook(
             gcp_conn_id=self.conn_id,
             use_legacy_sql=False,

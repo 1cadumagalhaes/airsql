@@ -6,13 +6,11 @@ and asset emission.
 from typing import Any, Optional
 
 from airflow.models import BaseOperator
-from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import (
     GCSToBigQueryOperator,
 )
 from airflow.sdk import Asset, Context
-from google.cloud import bigquery
 
 from airsql.sensors.postgres import PostgresSqlSensor
 from airsql.transfers.postgres_gcs import PostgresToGCSOperator
@@ -202,6 +200,11 @@ class PostgresToBigQueryOperator(BaseOperator):
 
     def _ensure_bigquery_dataset(self) -> None:
         """Ensure the destination BigQuery dataset exists, creating if necessary."""
+        from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
+            BigQueryHook,
+        )
+        from google.cloud import bigquery  # noqa: PLC0415
+
         try:
             # Parse project_id, dataset_id from destination_table
             # Format: project.dataset.table or dataset.table

@@ -5,17 +5,23 @@ Airflow operators for the airsql framework.
 import time
 from typing import Any, List, Optional
 
-import pandas as pd
 from airflow.models import BaseOperator
 from airflow.providers.common.sql.operators.sql import (
     SQLCheckOperator as BaseSQLCheckOperator,
 )
-from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 from airflow.sdk import Context
 
 from airsql.hooks import SQLHookManager
 from airsql.table import Table
 from airsql.utils import OperationSummary
+
+
+def _is_bigquery_hook(hook: Any) -> bool:
+    """Check if a hook is a BigQueryHook without importing the class.
+
+    Uses class name check to avoid expensive google.cloud.bigquery import during DAG parsing.
+    """
+    return hook.__class__.__name__ == 'BigQueryHook'
 
 
 class BaseSQLOperator(BaseOperator):
@@ -60,12 +66,14 @@ class SQLQueryOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and write to the output table."""
+        import pandas as pd  # noqa: PLC0415
+
         start_time = time.time()
         self.log.info(f'Executing SQL query to write to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if isinstance(hook, BigQueryHook):
+            if _is_bigquery_hook(hook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 # Use raw DBAPI connection for pandas with PyArrow for optimization
@@ -124,13 +132,15 @@ class SQLAppendOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and append to the output table."""
+        import pandas as pd  # noqa: PLC0415
+
         start_time = time.time()
         self.log.info(f'Executing SQL query to append to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if isinstance(hook, BigQueryHook):
+            if _is_bigquery_hook(hook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 # Use raw DBAPI connection for pandas with PyArrow for optimization
@@ -173,15 +183,17 @@ class SQLAppendOperator(BaseSQLOperator):
 class SQLDataFrameOperator(BaseSQLOperator):
     """Operator for SQL queries that return a pandas DataFrame."""
 
-    def execute(self, context: Context) -> pd.DataFrame:
+    def execute(self, context: Context):
         """Execute the SQL query and return a DataFrame."""
+        import pandas as pd  # noqa: PLC0415
+
         start_time = time.time()
         self.log.info('Executing SQL query to return DataFrame')
         self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if isinstance(hook, BigQueryHook):
+            if _is_bigquery_hook(hook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 # Use raw DBAPI connection for pandas with PyArrow for optimization
@@ -231,13 +243,15 @@ class SQLReplaceOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and replace the output table."""
+        import pandas as pd  # noqa: PLC0415
+
         start_time = time.time()
         self.log.info(f'Executing SQL query to replace {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if isinstance(hook, BigQueryHook):
+            if _is_bigquery_hook(hook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 # Use raw DBAPI connection for pandas with PyArrow for optimization
@@ -295,13 +309,15 @@ class SQLTruncateOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and truncate/reload the output table."""
+        import pandas as pd  # noqa: PLC0415
+
         start_time = time.time()
         self.log.info(f'Executing SQL query to truncate and reload {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if isinstance(hook, BigQueryHook):
+            if _is_bigquery_hook(hook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 # Use raw DBAPI connection for pandas with PyArrow for optimization
@@ -367,6 +383,8 @@ class SQLMergeOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> Any:
         """Execute the SQL query and merge into the output table."""
+        import pandas as pd  # noqa: PLC0415
+
         start_time = time.time()
         self.log.info(f'Executing SQL query to merge into {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
@@ -376,7 +394,7 @@ class SQLMergeOperator(BaseSQLOperator):
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if isinstance(hook, BigQueryHook):
+            if _is_bigquery_hook(hook):
                 df = hook.get_pandas_df(self.sql, dialect='standard')
             else:
                 # Use raw DBAPI connection for pandas with PyArrow for optimization

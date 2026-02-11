@@ -3,17 +3,11 @@ Hook manager for handling different database connections and operations.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from functools import lru_cache
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
-from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
-from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import get_current_context
 from airflow.sdk.bases.hook import BaseHook
-from google.cloud import bigquery
-from psycopg2 import sql as psycopg2_sql
-from psycopg2.extras import execute_values
-from sqlalchemy import text
 
 from airsql.table import Table
 
@@ -21,11 +15,21 @@ BIGQUERY_TABLE_NAME_PARTS = 2
 DEFAULT_TIMESTAMP_COLUMNS = ['updated_at', 'atualizado_em']
 
 
+@lru_cache(maxsize=128)
+def _get_connection_type(conn_id: str) -> str:
+    """Cached connection type lookup to avoid repeated DB queries."""
+    try:
+        conn = BaseHook.get_connection(conn_id)
+        return conn.conn_type.lower() if conn.conn_type else 'unknown'
+    except Exception:
+        return 'unknown'
+
+
 class SQLHookManager:
     """Manages database hooks and operations across different database types."""
 
     @staticmethod
-    def get_hook(conn_id: str) -> Union[PostgresHook, BigQueryHook]:
+    def get_hook(conn_id: str) -> Any:
         """Get the appropriate hook for a connection ID."""
         try:
             connection = BaseHook.get_connection(conn_id)
@@ -38,8 +42,16 @@ class SQLHookManager:
         conn_type = connection.conn_type.lower() if connection.conn_type else 'unknown'
 
         if conn_type in {'google_cloud_platform', 'gccpigquery'}:
+            from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
+                BigQueryHook,  # noqa: PLC0415
+            )
+
             return BigQueryHook(gcp_conn_id=conn_id)
         elif conn_type in {'postgres', 'postgresql'}:
+            from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
+                PostgresHook,  # noqa: PLC0415
+            )
+
             return PostgresHook(postgres_conn_id=conn_id)
         else:
             raise ValueError(
@@ -61,10 +73,12 @@ class SQLHookManager:
             raise ValueError(f'Unsupported database type for table: {table}')
 
     def _add_automatic_timestamps(
-        self, df: pd.DataFrame, table: Table, timestamp_column: Optional[str] = None
-    ) -> pd.DataFrame:
+        self, df, table: Table, timestamp_column: Optional[str] = None
+    ):
         """Add automatic timestamp columns to
         DataFrame if they exist in target table."""
+        import pandas as pd  # noqa: PLC0415
+
         try:
             try:
                 get_current_context()
@@ -99,7 +113,7 @@ class SQLHookManager:
 
     def write_dataframe_to_table(
         self,
-        df: pd.DataFrame,
+        df,
         table: Table,
         if_exists: str = 'append',
         timestamp_column: Optional[str] = None,
@@ -137,7 +151,7 @@ class SQLHookManager:
                 ) from e
 
     def replace_table_content(
-        self, df: pd.DataFrame, table: Table, timestamp_column: Optional[str] = None
+        self, df, table: Table, timestamp_column: Optional[str] = None
     ) -> None:
         """Replace the content of a table with DataFrame data."""
         df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
@@ -151,7 +165,7 @@ class SQLHookManager:
 
     def merge_dataframe_to_table(
         self,
-        df: pd.DataFrame,
+        df,
         table: Table,
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
@@ -178,7 +192,7 @@ class SQLHookManager:
             raise ValueError(f'Unsupported database type for table: {table}')
 
     def truncate_table_content(
-        self, df: pd.DataFrame, table: Table, timestamp_column: Optional[str] = None
+        self, df, table: Table, timestamp_column: Optional[str] = None
     ) -> None:
         """Truncate the content of a table and insert new data, preserving table structure and sequences."""
         df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
@@ -206,7 +220,7 @@ class SQLHookManager:
                 ) from e
 
     @staticmethod
-    def _get_bigquery_schema(hook: BigQueryHook, table: Table) -> List[Dict[str, Any]]:
+    def _get_bigquery_schema(hook: Any, table: Table) -> List[Dict[str, Any]]:
         """Get BigQuery table schema."""
         parts = table.table_name.split('.')
         if len(parts) == BIGQUERY_TABLE_NAME_PARTS:
@@ -223,7 +237,7 @@ class SQLHookManager:
         ]
 
     @staticmethod
-    def _get_postgres_schema(hook: PostgresHook, table: Table) -> List[Dict[str, Any]]:
+    def _get_postgres_schema(hook, table: Table) -> List[Dict[str, Any]]:
         """Get Postgres table schema."""
         if '.' in table.table_name:
             schema_name, table_name = table.table_name.split('.', 1)
@@ -245,9 +259,14 @@ class SQLHookManager:
 
     @staticmethod
     def _write_to_bigquery(
-        df: pd.DataFrame, table: Table, if_exists: str = 'append'
+        df, table: Table, if_exists: str = 'append'
     ) -> None:
         """Write DataFrame to BigQuery table."""
+        from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
+            BigQueryHook,  # noqa: PLC0415
+        )
+        from google.cloud import bigquery  # noqa: PLC0415
+
         hook = BigQueryHook(gcp_conn_id=table.conn_id)
         parts = table.table_name.split('.')
         if len(parts) == BIGQUERY_TABLE_NAME_PARTS:
@@ -292,9 +311,13 @@ class SQLHookManager:
 
     @staticmethod
     def _write_to_postgres(
-        df: pd.DataFrame, table: Table, if_exists: str = 'append'
+        df, table: Table, if_exists: str = 'append'
     ) -> None:
         """Write DataFrame to Postgres table using PyArrow for optimization."""
+        from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
+            PostgresHook,  # noqa: PLC0415
+        )
+
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         engine = hook.get_sqlalchemy_engine()
         if '.' in table.table_name:
@@ -313,8 +336,13 @@ class SQLHookManager:
         )
 
     @staticmethod
-    def _replace_bigquery_table(df: pd.DataFrame, table: Table) -> None:
+    def _replace_bigquery_table(df, table: Table) -> None:
         """Replace BigQuery table content using WRITE_TRUNCATE."""
+        from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
+            BigQueryHook,  # noqa: PLC0415
+        )
+        from google.cloud import bigquery  # noqa: PLC0415
+
         hook = BigQueryHook(gcp_conn_id=table.conn_id)
         parts = table.table_name.split('.')
         if len(parts) == BIGQUERY_TABLE_NAME_PARTS:
@@ -348,8 +376,12 @@ class SQLHookManager:
         job.result()  # Wait for the job to complete
 
     @staticmethod
-    def _replace_postgres_table(df: pd.DataFrame, table: Table) -> None:
+    def _replace_postgres_table(df, table: Table) -> None:
         """Replace Postgres table content using PyArrow for optimization."""
+        from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
+            PostgresHook,  # noqa: PLC0415
+        )
+
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         engine = hook.get_sqlalchemy_engine()
         if '.' in table.table_name:
@@ -370,12 +402,19 @@ class SQLHookManager:
 
     @staticmethod
     def _merge_bigquery_table(  # noqa: PLR0914
-        df: pd.DataFrame,
+        df,
         table: Table,
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
     ) -> None:
         """Merge DataFrame into BigQuery table using MERGE statement."""
+        import pandas as pd  # noqa: PLC0415
+
+        from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
+            BigQueryHook,  # noqa: PLC0415
+        )
+        from google.cloud import bigquery  # noqa: PLC0415
+
         hook = BigQueryHook(gcp_conn_id=table.conn_id)
         parts = table.table_name.split('.')
         if len(parts) == BIGQUERY_TABLE_NAME_PARTS:
@@ -445,12 +484,18 @@ WHEN NOT MATCHED THEN
 
     def _merge_postgres_table(  # noqa: PLR0914
         self,
-        df: pd.DataFrame,
+        df,
         table: Table,
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
     ) -> None:
         """Merge DataFrame into Postgres table using ON CONFLICT."""
+        from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
+            PostgresHook,  # noqa: PLC0415
+        )
+        from psycopg2 import sql as psycopg2_sql  # noqa: PLC0415
+        from psycopg2.extras import execute_values  # noqa: PLC0415
+
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         conn = hook.get_conn()
         cursor = conn.cursor()
@@ -548,8 +593,13 @@ WHEN NOT MATCHED THEN
             conn.close()
 
     @staticmethod
-    def _truncate_postgres_table(df: pd.DataFrame, table: Table) -> None:
+    def _truncate_postgres_table(df, table: Table) -> None:
         """Truncate Postgres table content, preserving table structure and sequences using PyArrow."""
+        from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
+            PostgresHook,  # noqa: PLC0415
+        )
+        from sqlalchemy import text  # noqa: PLC0415
+
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         engine = hook.get_sqlalchemy_engine()
 

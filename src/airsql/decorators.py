@@ -8,23 +8,16 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
-import pandas as pd
+from typing import TYPE_CHECKING
+
 from airflow.sdk import get_current_context, task
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from airsql.file import File
-from airsql.operators import (
-    DataFrameLoadOperator,
-    DataFrameMergeOperator,
-    SQLAppendOperator,
-    SQLCheckOperator,
-    SQLDataFrameOperator,
-    SQLMergeOperator,
-    SQLQueryOperator,
-    SQLReplaceOperator,
-    SQLTruncateOperator,
-)
 from airsql.table import Table
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 class SQLDecorators:
@@ -176,6 +169,8 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
+                from airsql.operators import SQLQueryOperator  # noqa: PLC0415
+
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
@@ -225,6 +220,8 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
+                from airsql.operators import SQLAppendOperator  # noqa: PLC0415
+
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
@@ -269,7 +266,9 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @task(task_id=func.__name__)
             @wraps(func)
-            def wrapper(*args, **kwargs) -> pd.DataFrame:
+            def wrapper(*args, **kwargs):
+                from airsql.operators import SQLDataFrameOperator  # noqa: PLC0415
+
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
@@ -312,6 +311,11 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> None:
+                from airsql.operators import (  # noqa: PLC0415
+                    SQLReplaceOperator,
+                    SQLTruncateOperator,
+                )
+
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
@@ -371,6 +375,8 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> None:
+                from airsql.operators import SQLTruncateOperator  # noqa: PLC0415
+
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
@@ -424,6 +430,8 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> None:
+                from airsql.operators import SQLMergeOperator  # noqa: PLC0415
+
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
@@ -455,7 +463,7 @@ class SQLDecorators:
         output_table: Table,
         timestamp_column: Optional[str] = None,
         if_exists: str = 'append',
-        dataframe: Optional[pd.DataFrame] = None,
+        dataframe=None,
         dry_run: bool = False,
         **extra_kwargs,
     ) -> Callable:
@@ -503,6 +511,10 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
+                import pandas as pd  # noqa: PLC0415
+
+                from airsql.operators import DataFrameLoadOperator  # noqa: PLC0415
+
                 # Use provided dataframe or get it from function
                 if dataframe is not None:
                     df = dataframe
@@ -541,7 +553,7 @@ class SQLDecorators:
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
-        dataframe: Optional[pd.DataFrame] = None,
+        dataframe=None,
         dry_run: bool = False,
         **extra_kwargs,
     ) -> Callable:
@@ -593,6 +605,10 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
+                import pandas as pd  # noqa: PLC0415
+
+                from airsql.operators import DataFrameMergeOperator  # noqa: PLC0415
+
                 # Use provided dataframe or get it from function
                 if dataframe is not None:
                     df = dataframe
@@ -659,6 +675,8 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
+                from airsql.operators import SQLCheckOperator  # noqa: PLC0415
+
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
@@ -700,6 +718,8 @@ class SQLDecorators:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args, **kwargs) -> Any:
+                from airsql.operators import SQLQueryOperator  # noqa: PLC0415
+
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
@@ -773,6 +793,11 @@ class SQLDecorators:
             @task(task_id=func.__name__)
             @wraps(func)
             def wrapper(*args, **kwargs) -> str:
+                from airsql.operators import (  # noqa: PLC0415
+                    DataFrameMergeOperator,
+                    SQLDataFrameOperator,
+                )
+
                 # First, extract the data using SQL
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
@@ -857,6 +882,11 @@ class SQLDecorators:
             @task(task_id=func.__name__)
             @wraps(func)
             def wrapper(*args, **kwargs) -> str:
+                from airsql.operators import (  # noqa: PLC0415
+                    DataFrameLoadOperator,
+                    SQLDataFrameOperator,
+                )
+
                 # First, extract the data using SQL
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
