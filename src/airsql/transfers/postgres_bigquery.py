@@ -235,7 +235,9 @@ class PostgresToBigQueryOperator(BaseOperator):
             self.log.info(
                 f'Ensuring BigQuery dataset exists: {project_id}.{dataset_id}'
             )
-            bq_hook.get_conn().create_dataset(dataset, exists_ok=True)
+            bq_hook.get_client(project_id=project_id, location=dataset.location).create_dataset(
+                dataset=dataset, exists_ok=True
+            )
             self.log.info(f'BigQuery dataset ready: {project_id}.{dataset_id}')
         except Exception as e:
             self.log.error(f'Failed to ensure BigQuery dataset exists: {e}')
