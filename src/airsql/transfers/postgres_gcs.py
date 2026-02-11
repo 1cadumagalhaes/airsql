@@ -283,8 +283,16 @@ class PostgresToGCSOperator(BaseOperator):
         try:
             for col in df.columns:
                 if pd.api.types.is_datetime64_any_dtype(df[col]):
-                    # Cast to microsecond precision
+                    # Cast to microsecond precision and ensure PyArrow type is set correctly
                     df[col] = df[col].dt.round('us')
+                    # Convert to PyArrow timestamp[us] to ensure Parquet uses TIMESTAMP_MICROS
+                    try:
+                        df[col] = df[col].astype(
+                            pd.ArrowDtype(pa.timestamp('us', tz=df[col].dtype.tz))
+                        )
+                    except Exception:
+                        # If conversion fails, keep the pandas native datetime64[us] type
+                        df[col] = df[col].astype('datetime64[us]')
         except Exception as e:
             self.log.warning(f'Failed to fix timestamp precision: {e}')
 
@@ -345,6 +353,7 @@ class PostgresToGCSOperator(BaseOperator):
             parquet_kwargs = {
                 'index': False,
                 'engine': 'pyarrow',
+                'coerce_timestamps': 'us',  # Ensure timestamps are written as microseconds
                 **self.parquet_kwargs,
             }
             data_buffer = BytesIO()
