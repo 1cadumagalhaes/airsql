@@ -11,6 +11,15 @@ __all__ = [
     'BigQueryToPostgresOperator',
 ]
 
+from airsql.transfers.bigquery_postgres import (
+    BigQueryToPostgresOperator,  # noqa: E402, F401
+)
+from airsql.transfers.gcs_postgres import GCSToPostgresOperator  # noqa: E402, F401
+from airsql.transfers.postgres_bigquery import (
+    PostgresToBigQueryOperator,  # noqa: E402, F401
+)
+from airsql.transfers.postgres_gcs import PostgresToGCSOperator  # noqa: E402, F401
+
 
 def __getattr__(name):
     if name == 'BigQueryToPostgresOperator':
@@ -37,4 +46,4 @@ def __getattr__(name):
         )
 
         return PostgresToGCSOperator
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

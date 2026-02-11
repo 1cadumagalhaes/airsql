@@ -5,6 +5,7 @@ Airflow operators for the airsql framework.
 import time
 from typing import Any, List, Optional
 
+import pandas as pd
 from airflow.models import BaseOperator
 from airflow.providers.common.sql.operators.sql import (
     SQLCheckOperator as BaseSQLCheckOperator,

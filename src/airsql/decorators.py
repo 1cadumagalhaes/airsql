@@ -6,9 +6,7 @@ import inspect
 import os
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, List, Optional
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from airflow.sdk import get_current_context, task
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -17,7 +15,7 @@ from airsql.file import File
 from airsql.table import Table
 
 if TYPE_CHECKING:
-    import pandas as pd
+    pass
 
 
 class SQLDecorators:

@@ -258,9 +258,7 @@ class SQLHookManager:
         ]
 
     @staticmethod
-    def _write_to_bigquery(
-        df, table: Table, if_exists: str = 'append'
-    ) -> None:
+    def _write_to_bigquery(df, table: Table, if_exists: str = 'append') -> None:
         """Write DataFrame to BigQuery table."""
         from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
             BigQueryHook,  # noqa: PLC0415
@@ -310,9 +308,7 @@ class SQLHookManager:
         job.result()  # Wait for the job to complete
 
     @staticmethod
-    def _write_to_postgres(
-        df, table: Table, if_exists: str = 'append'
-    ) -> None:
+    def _write_to_postgres(df, table: Table, if_exists: str = 'append') -> None:
         """Write DataFrame to Postgres table using PyArrow for optimization."""
         from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
             PostgresHook,  # noqa: PLC0415
@@ -409,7 +405,6 @@ class SQLHookManager:
     ) -> None:
         """Merge DataFrame into BigQuery table using MERGE statement."""
         import pandas as pd  # noqa: PLC0415
-
         from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
             BigQueryHook,  # noqa: PLC0415
         )
