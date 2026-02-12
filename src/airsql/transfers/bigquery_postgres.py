@@ -1,14 +1,7 @@
 from typing import Any, List, Optional
 
 from airflow.models import BaseOperator
-from airflow.providers.google.cloud.hooks.gcs import GCSHook
-from airflow.providers.google.cloud.transfers.bigquery_to_gcs import (
-    BigQueryToGCSOperator,
-)
 from airflow.sdk import Asset, Context
-
-from airsql.sensors.bigquery import BigQuerySqlSensor
-from airsql.transfers.gcs_postgres import GCSToPostgresOperator
 
 
 class BigQueryToPostgresOperator(BaseOperator):
@@ -84,6 +77,12 @@ class BigQueryToPostgresOperator(BaseOperator):
             self.log.info(
                 f'Extracting data from BigQuery to GCS: gs://{self.gcs_bucket}/{self.gcs_temp_path}'
             )
+
+            # Lazy import - only load when actually executing
+            from airflow.providers.google.cloud.transfers.bigquery_to_gcs import (  # noqa: PLC0415
+                BigQueryToGCSOperator,
+            )
+
             # Build BigQueryToGCSOperator kwargs based on format
             bq_to_gcs_kwargs = {
                 'task_id': f'{self.task_id}_extract',
@@ -112,6 +111,8 @@ class BigQueryToPostgresOperator(BaseOperator):
                 f'[DRY RUN] Would load data from GCS to PostgreSQL: {self.destination_table}'
             )
 
+        from airsql.transfers.gcs_postgres import GCSToPostgresOperator  # noqa: PLC0415
+
         gcs_to_pg = GCSToPostgresOperator(
             task_id=f'{self.task_id}_load',
             target_table_name=self.destination_table,
@@ -137,6 +138,8 @@ class BigQueryToPostgresOperator(BaseOperator):
 
     def _check_source_data(self, context: Context) -> None:
         """Check if source table exists and has data."""
+        from airsql.sensors.bigquery import BigQuerySqlSensor  # noqa: PLC0415
+
         if self.source_table_check_sql:
             check_sql = self.source_table_check_sql
         else:
@@ -156,6 +159,8 @@ class BigQueryToPostgresOperator(BaseOperator):
 
     def _cleanup_temp_files(self) -> None:
         """Clean up temporary files from GCS."""
+        from airflow.providers.google.cloud.hooks.gcs import GCSHook  # noqa: PLC0415
+
         try:
             self.log.info(
                 f'Cleaning up temporary file: gs://{self.gcs_bucket}/{self.gcs_temp_path}'

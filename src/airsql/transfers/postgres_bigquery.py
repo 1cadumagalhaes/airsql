@@ -6,15 +6,7 @@ and asset emission.
 from typing import Any, Optional
 
 from airflow.models import BaseOperator
-from airflow.providers.google.cloud.hooks.gcs import GCSHook
-from airflow.providers.google.cloud.transfers.gcs_to_bigquery import (
-    GCSToBigQueryOperator,
-)
-from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import Asset, Context
-
-from airsql.sensors.postgres import PostgresSqlSensor
-from airsql.transfers.postgres_gcs import PostgresToGCSOperator
 
 # Constants for destination table parsing
 _FULL_TABLE_PARTS = 3  # project.dataset.table
@@ -85,7 +77,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         if self.emit_asset:
             self.outlets = [Asset(f'airsql://database/{self.destination_table}')]
 
-    def _detect_json_columns(self, pg_hook: PostgresHook) -> set:
+    def _detect_json_columns(self, pg_hook) -> set:
         """Detect JSON/JSONB columns from the source PostgreSQL query.
 
         Returns a set of column names that are JSON/JSONB type.
@@ -135,6 +127,8 @@ class PostgresToBigQueryOperator(BaseOperator):
         )
 
         if self.export_format == 'parquet':
+            from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
+
             pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
             json_columns = self._detect_json_columns(pg_hook)
             if json_columns:
@@ -150,6 +144,8 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.log.info(
             f'Extracting data from PostgreSQL to GCS: gs://{self.gcs_bucket}/{actual_gcs_temp_path}'
         )
+
+        from airsql.transfers.postgres_gcs import PostgresToGCSOperator  # noqa: PLC0415
 
         pg_to_gcs = PostgresToGCSOperator(
             task_id=f'{self.task_id}_extract',
@@ -171,6 +167,11 @@ class PostgresToBigQueryOperator(BaseOperator):
 
             # Ensure destination dataset exists before loading
             self._ensure_bigquery_dataset()
+
+            # Lazy import - only load when actually executing
+            from airflow.providers.google.cloud.transfers.gcs_to_bigquery import (  # noqa: PLC0415
+                GCSToBigQueryOperator,
+            )
 
             # Build GCSToBigQueryOperator kwargs based on actual format
             gcs_to_bq_kwargs = {
@@ -217,6 +218,8 @@ class PostgresToBigQueryOperator(BaseOperator):
 
     def _check_source_data(self, context: Context) -> None:
         """Check if source table exists and has data."""
+        from airsql.sensors.postgres import PostgresSqlSensor  # noqa: PLC0415
+
         if self.source_table_check_sql:
             check_sql = self.source_table_check_sql
         else:
@@ -240,6 +243,8 @@ class PostgresToBigQueryOperator(BaseOperator):
         Args:
             temp_path: The path to clean up. If not provided, uses self.gcs_temp_path.
         """
+        from airflow.providers.google.cloud.hooks.gcs import GCSHook  # noqa: PLC0415
+
         cleanup_path = temp_path or self.gcs_temp_path
         try:
             self.log.info(

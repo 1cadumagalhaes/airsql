@@ -1,11 +1,7 @@
 import time
 from io import BytesIO, StringIO
 
-import numpy as np
-import pandas as pd
 from airflow.models import BaseOperator
-from airflow.providers.google.cloud.hooks.gcs import GCSHook
-from airflow.providers.postgres.hooks.postgres import PostgresHook
 from psycopg2 import sql as psycopg2_sql
 from psycopg2.extras import execute_values
 
@@ -51,6 +47,9 @@ class GCSToPostgresOperator(BaseOperator):
 
         Handles both PyArrow-backed and standard pandas DataFrames efficiently.
         """
+        import numpy as np  # noqa: PLC0415
+        import pandas as pd  # noqa: PLC0415
+
         # For PyArrow-backed DataFrames, convert to numpy with None for nulls
         # For standard pandas DataFrames, convert_dtypes handles NA values
         if hasattr(df, '__arrow_c_stream__'):  # PyArrow-backed DataFrame
@@ -109,6 +108,12 @@ class GCSToPostgresOperator(BaseOperator):
         return 'csv'
 
     def execute(self, context):  # noqa: PLR0912, PLR0914
+        import numpy as np  # noqa: PLC0415
+        import pandas as pd  # noqa: PLC0415
+
+        from airflow.providers.google.cloud.hooks.gcs import GCSHook  # noqa: PLC0415
+        from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
+
         start_time = time.time()
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
         file_data = gcs_hook.download(

@@ -8,11 +8,7 @@ import warnings
 from io import BytesIO, StringIO
 from typing import Dict, List, Optional, Sequence
 
-import pandas as pd
-import pyarrow as pa
 from airflow.models import BaseOperator
-from airflow.providers.google.cloud.hooks.gcs import GCSHook
-from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from airsql.utils import DataValidator, OperationSummary
 
@@ -28,6 +24,8 @@ def _pa_table_to_bq_schema(
 
     Returns a list of dicts compatible with BigQuery load schema JSON: [{"name":..., "type":..., "mode":..., "fields": [...]}, ...]
     """
+    import pyarrow as pa  # noqa: PLC0415
+
     # Ensure we have a pyarrow.Table
     if isinstance(df, pa.Table):
         table = df
@@ -299,6 +297,12 @@ class PostgresToGCSOperator(BaseOperator):
         return df
 
     def execute(self, context) -> str:
+        import pandas as pd  # noqa: PLC0415
+        import pyarrow as pa  # noqa: PLC0415
+
+        from airflow.providers.google.cloud.hooks.gcs import GCSHook  # noqa: PLC0415
+        from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
+
         start_time = time.time()
         pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
