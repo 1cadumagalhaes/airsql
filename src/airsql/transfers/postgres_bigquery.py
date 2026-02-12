@@ -6,6 +6,7 @@ and asset emission.
 from typing import Any, Optional
 
 from airflow.models import BaseOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import Asset, Context
 
 # Constants for destination table parsing
@@ -127,8 +128,6 @@ class PostgresToBigQueryOperator(BaseOperator):
         )
 
         if self.export_format == 'parquet':
-            from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
-
             pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
             json_columns = self._detect_json_columns(pg_hook)
             if json_columns:
