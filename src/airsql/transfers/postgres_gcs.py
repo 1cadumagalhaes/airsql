@@ -3,6 +3,8 @@ Operator to transfer data from PostgreSQL to Google Cloud Storage.
 """
 
 import json
+import os
+import tempfile
 import time
 import warnings
 from io import BytesIO, StringIO
@@ -14,7 +16,7 @@ from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
-from airsql.utils import DataValidator, OperationSummary
+from airsql.utils import DataValidator, OperationSummary, ValidationResult
 
 
 def _pa_table_to_bq_schema(
@@ -245,7 +247,7 @@ class PostgresToGCSOperator(BaseOperator):
                 f"Unsupported format: {self.export_format}. Must be 'csv', 'parquet', or 'jsonl'."
             )
 
-    def _detect_json_columns(self, df, pg_hook) -> set:
+    def _detect_json_columns(self, pg_hook) -> set:
         """Detect JSON/JSONB columns from the source PostgreSQL query.
 
         Returns a set of column names that are JSON/JSONB type.
@@ -306,19 +308,9 @@ class PostgresToGCSOperator(BaseOperator):
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
 
         self.log.info(f'Extracting data from Postgres using query: {self.sql}')
-        # Use PyArrow backend for better performance and type handling
-        df = pg_hook.get_pandas_df(
-            sql=self.sql, chunksize=self.pandas_chunksize, dtype_backend='pyarrow'
-        )
+        engine = pg_hook.get_sqlalchemy_engine()
 
-        if df.empty:
-            self.log.info('No data extracted from Postgres. Skipping upload to GCS.')
-            return f'gs://{self.bucket}/{self.filename}'
-
-        self.log.info(f'Extracted {len(df)} rows from Postgres.')
-
-        # Detect JSON columns and adjust export format if needed
-        json_columns = self._detect_json_columns(df, pg_hook)
+        json_columns = self._detect_json_columns(pg_hook)
         export_format = self.export_format
         if json_columns and self.export_format == 'parquet':
             self.log.info(
@@ -326,42 +318,137 @@ class PostgresToGCSOperator(BaseOperator):
             )
             export_format = 'jsonl'
 
-        # Fix timestamp precision: cast nanosecond timestamps to microsecond precision
-        # BigQuery Parquet loader doesn't support TIMESTAMP_NANOS
-        df = self._fix_timestamp_precision(df)
+        tmp_path: Optional[str] = None
+        data_bytes: bytes = b''
+        mime_type = 'application/octet-stream'
+        rows_extracted = 0
+        validation_result = ValidationResult(is_valid=True)
+        schema_source_df: Optional[pd.DataFrame] = None
 
-        # Validate DataFrame
-        validation_result = DataValidator.validate_row_count(df, min_rows=1)
-        if validation_result.errors:
-            for error in validation_result.errors:
-                self.log.error(f'Validation error: {error}')
-        for warning in validation_result.warnings:
-            self.log.warning(f'Validation warning: {warning}')
+        if self.pandas_chunksize:
+            suffix = (
+                '.parquet'
+                if export_format == 'parquet'
+                else ('.jsonl' if export_format == 'jsonl' else '.csv')
+            )
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp_path = tmp.name
+            tmp.close()
 
-        if export_format == 'csv':
-            csv_kwargs = {'index': False, **self.csv_kwargs}
-            data_buffer = StringIO()
-            df.to_csv(data_buffer, **csv_kwargs)
-            data_bytes = data_buffer.getvalue().encode('utf-8')
-            mime_type = 'text/csv'
-        elif export_format == 'jsonl':
-            # Convert DataFrame to JSONL format using pandas native support
-            data_buffer = StringIO()
-            df.to_json(data_buffer, orient='records', lines=True)
-            data_bytes = data_buffer.getvalue().encode('utf-8')
-            mime_type = 'application/x-ndjson'
-        elif export_format == 'parquet':
-            # PyArrow is the default and optimal engine for parquet with PyArrow-backed DataFrames
-            parquet_kwargs = {
-                'index': False,
-                'engine': 'pyarrow',
-                'coerce_timestamps': 'us',  # Ensure timestamps are written as microseconds
-                **self.parquet_kwargs,
-            }
-            data_buffer = BytesIO()
-            df.to_parquet(data_buffer, **parquet_kwargs)
-            data_bytes = data_buffer.getvalue()
-            mime_type = 'application/octet-stream'
+            first_chunk = True
+            parquet_writer = None
+            try:
+                if export_format == 'parquet':
+                    import pyarrow.parquet as pq  # noqa: PLC0415
+
+                for chunk in pd.read_sql(
+                    self.sql,
+                    engine,
+                    chunksize=self.pandas_chunksize,
+                    dtype_backend='pyarrow',
+                ):
+                    if chunk.empty:
+                        continue
+
+                    fixed_chunk = self._fix_timestamp_precision(chunk)
+                    rows_extracted += len(fixed_chunk)
+                    if schema_source_df is None:
+                        schema_source_df = fixed_chunk
+
+                    if export_format == 'csv':
+                        csv_kwargs = {'index': False, **self.csv_kwargs}
+                        fixed_chunk.to_csv(
+                            tmp_path,
+                            mode='a',
+                            header=first_chunk,
+                            **csv_kwargs,
+                        )
+                        mime_type = 'text/csv'
+                    elif export_format == 'jsonl':
+                        with open(tmp_path, 'a', encoding='utf-8') as f:
+                            fixed_chunk.to_json(f, orient='records', lines=True)
+                        mime_type = 'application/x-ndjson'
+                    else:
+                        table = pa.Table.from_pandas(fixed_chunk, preserve_index=False)
+                        if first_chunk:
+                            parquet_writer = pq.ParquetWriter(tmp_path, table.schema)
+                        parquet_writer.write_table(table)
+                        mime_type = 'application/octet-stream'
+
+                    first_chunk = False
+
+                if parquet_writer:
+                    parquet_writer.close()
+
+            except Exception as e:
+                if parquet_writer:
+                    parquet_writer.close()
+                if tmp_path:
+                    try:
+                        os.remove(tmp_path)
+                    except Exception as exc:  # noqa: PLC410
+                        self.log.debug(
+                            'Failed to remove tmp file %s: %s', tmp_path, exc
+                        )
+                self.log.error(f'Failed during streaming export: {e}')
+                raise
+
+            if rows_extracted == 0:
+                if tmp_path:
+                    try:
+                        os.remove(tmp_path)
+                    except Exception as exc:  # noqa: PLC410
+                        self.log.debug(
+                            'Failed to remove tmp file %s: %s', tmp_path, exc
+                        )
+                self.log.info(
+                    'No data extracted from Postgres. Skipping upload to GCS.'
+                )
+                return f'gs://{self.bucket}/{self.filename}'
+
+            self.log.info(f'Extracted {rows_extracted} rows from Postgres.')
+            file_size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
+            validation_result = ValidationResult(is_valid=True)
+        else:
+            df = pd.read_sql(self.sql, engine, dtype_backend='pyarrow')
+            if df.empty:
+                self.log.info(
+                    'No data extracted from Postgres. Skipping upload to GCS.'
+                )
+                return f'gs://{self.bucket}/{self.filename}'
+
+            self.log.info(f'Extracted {len(df)} rows from Postgres.')
+
+            df = self._fix_timestamp_precision(df)
+            schema_source_df = df
+            rows_extracted = len(df)
+
+            validation_result = DataValidator.validate_row_count(df, min_rows=1)
+
+            if export_format == 'csv':
+                csv_kwargs = {'index': False, **self.csv_kwargs}
+                data_buffer = StringIO()
+                df.to_csv(data_buffer, **csv_kwargs)
+                data_bytes = data_buffer.getvalue().encode('utf-8')
+                mime_type = 'text/csv'
+            elif export_format == 'jsonl':
+                data_buffer = StringIO()
+                df.to_json(data_buffer, orient='records', lines=True)
+                data_bytes = data_buffer.getvalue().encode('utf-8')
+                mime_type = 'application/x-ndjson'
+            else:
+                parquet_kwargs = {
+                    'index': False,
+                    'engine': 'pyarrow',
+                    'coerce_timestamps': 'us',
+                    **self.parquet_kwargs,
+                }
+                data_buffer = BytesIO()
+                df.to_parquet(data_buffer, **parquet_kwargs)
+                data_bytes = data_buffer.getvalue()
+                mime_type = 'application/octet-stream'
+
+            file_size_mb = len(data_bytes) / (1024 * 1024)
 
         # If requested, generate and upload a BigQuery-compatible schema JSON
         # Schema generation is only for Parquet format, not JSONL (BigQuery auto-detects JSONL)
@@ -418,8 +505,15 @@ class PostgresToGCSOperator(BaseOperator):
                 except Exception:
                     postgres_type_map = None
 
+                if schema_source_df is None:
+                    raise ValueError(
+                        'Could not infer schema source dataframe for schema generation'
+                    )
+
                 schema_fields = _pa_table_to_bq_schema(
-                    df, detect_json=False, postgres_type_map=postgres_type_map
+                    schema_source_df,
+                    detect_json=False,
+                    postgres_type_map=postgres_type_map,
                 )
                 gcs_hook.upload(
                     bucket_name=self.bucket,
@@ -439,13 +533,20 @@ class PostgresToGCSOperator(BaseOperator):
                     stacklevel=2,
                 )
 
+        if validation_result.errors:
+            for error in validation_result.errors:
+                self.log.error(f'Validation error: {error}')
+        for warning in validation_result.warnings:
+            self.log.warning(f'Validation warning: {warning}')
+
         duration = time.time() - start_time
+        rows_loaded = rows_extracted if not self.dry_run else 0
         summary = OperationSummary(
             operation_type='export',
-            rows_extracted=len(df),
-            rows_loaded=len(df) if not self.dry_run else 0,
+            rows_extracted=rows_extracted,
+            rows_loaded=rows_loaded,
             duration_seconds=duration,
-            file_size_mb=len(data_bytes) / (1024 * 1024),
+            file_size_mb=file_size_mb,
             format_used=export_format,
             validation_errors=validation_result.errors,
             validation_warnings=validation_result.warnings,
@@ -455,17 +556,36 @@ class PostgresToGCSOperator(BaseOperator):
             self.log.info(
                 f'Uploading data as {export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
             )
-            gcs_hook.upload(
-                bucket_name=self.bucket,
-                object_name=self.filename,
-                data=data_bytes,
-                mime_type=mime_type,
-            )
+            # If we streamed into a temp file, upload from file to avoid huge memory usage
+            if tmp_path:
+                gcs_hook.upload(
+                    bucket_name=self.bucket,
+                    object_name=self.filename,
+                    filename=tmp_path,
+                    mime_type=mime_type,
+                )
+                # Cleanup tmp file
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    self.log.debug('Failed to remove temporary file: %s', tmp_path)
+            else:
+                gcs_hook.upload(
+                    bucket_name=self.bucket,
+                    object_name=self.filename,
+                    data=data_bytes,
+                    mime_type=mime_type,
+                )
             self.log.info('Upload complete.')
         else:
             self.log.info(
-                f'[DRY RUN] Would upload {len(df)} rows as {export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
+                f'[DRY RUN] Would upload {rows_extracted} rows as {export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
             )
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    self.log.debug('Failed to remove temporary file: %s', tmp_path)
 
         self.log.info(summary.to_log_summary())
         return f'gs://{self.bucket}/{self.filename}'

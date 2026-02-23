@@ -25,6 +25,22 @@ def _is_bigquery_hook(hook: Any) -> bool:
     return hook.__class__.__name__ == 'BigQueryHook'
 
 
+def _read_dataframe_from_hook(hook: Any, sql: str):
+    if _is_bigquery_hook(hook):
+        return hook.get_pandas_df(sql, dialect='standard')
+
+    try:
+        engine = hook.get_sqlalchemy_engine()
+    except (AttributeError, NotImplementedError):
+        conn = hook.get_conn()
+        try:
+            return pd.read_sql(sql, conn, dtype_backend='pyarrow')
+        finally:
+            conn.close()
+
+    return pd.read_sql(sql, engine, dtype_backend='pyarrow')
+
+
 class BaseSQLOperator(BaseOperator):
     """Base class for SQL operators.
 
@@ -67,22 +83,12 @@ class SQLQueryOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and write to the output table."""
-        import pandas as pd  # noqa: PLC0415
-
         start_time = time.time()
         self.log.info(f'Executing SQL query to write to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if _is_bigquery_hook(hook):
-                df = hook.get_pandas_df(self.sql, dialect='standard')
-            else:
-                # Use raw DBAPI connection for pandas with PyArrow for optimization
-                conn = hook.get_conn()
-                try:
-                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
-                finally:
-                    conn.close()
+            df = _read_dataframe_from_hook(hook, self.sql)
 
             duration = time.time() - start_time
             summary = OperationSummary(
@@ -133,23 +139,13 @@ class SQLAppendOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and append to the output table."""
-        import pandas as pd  # noqa: PLC0415
-
         start_time = time.time()
         self.log.info(f'Executing SQL query to append to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if _is_bigquery_hook(hook):
-                df = hook.get_pandas_df(self.sql, dialect='standard')
-            else:
-                # Use raw DBAPI connection for pandas with PyArrow for optimization
-                conn = hook.get_conn()
-                try:
-                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
-                finally:
-                    conn.close()
+            df = _read_dataframe_from_hook(hook, self.sql)
 
             duration = time.time() - start_time
             summary = OperationSummary(
@@ -186,23 +182,13 @@ class SQLDataFrameOperator(BaseSQLOperator):
 
     def execute(self, context: Context):
         """Execute the SQL query and return a DataFrame."""
-        import pandas as pd  # noqa: PLC0415
-
         start_time = time.time()
         self.log.info('Executing SQL query to return DataFrame')
         self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if _is_bigquery_hook(hook):
-                df = hook.get_pandas_df(self.sql, dialect='standard')
-            else:
-                # Use raw DBAPI connection for pandas with PyArrow for optimization
-                conn = hook.get_conn()
-                try:
-                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
-                finally:
-                    conn.close()
+            df = _read_dataframe_from_hook(hook, self.sql)
 
             duration = time.time() - start_time
             summary = OperationSummary(
@@ -244,23 +230,13 @@ class SQLReplaceOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and replace the output table."""
-        import pandas as pd  # noqa: PLC0415
-
         start_time = time.time()
         self.log.info(f'Executing SQL query to replace {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if _is_bigquery_hook(hook):
-                df = hook.get_pandas_df(self.sql, dialect='standard')
-            else:
-                # Use raw DBAPI connection for pandas with PyArrow for optimization
-                conn = hook.get_conn()
-                try:
-                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
-                finally:
-                    conn.close()
+            df = _read_dataframe_from_hook(hook, self.sql)
 
             duration = time.time() - start_time
             summary = OperationSummary(
@@ -310,23 +286,13 @@ class SQLTruncateOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and truncate/reload the output table."""
-        import pandas as pd  # noqa: PLC0415
-
         start_time = time.time()
         self.log.info(f'Executing SQL query to truncate and reload {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if _is_bigquery_hook(hook):
-                df = hook.get_pandas_df(self.sql, dialect='standard')
-            else:
-                # Use raw DBAPI connection for pandas with PyArrow for optimization
-                conn = hook.get_conn()
-                try:
-                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
-                finally:
-                    conn.close()
+            df = _read_dataframe_from_hook(hook, self.sql)
 
             duration = time.time() - start_time
             summary = OperationSummary(
@@ -384,8 +350,6 @@ class SQLMergeOperator(BaseSQLOperator):
 
     def execute(self, context: Context) -> Any:
         """Execute the SQL query and merge into the output table."""
-        import pandas as pd  # noqa: PLC0415
-
         start_time = time.time()
         self.log.info(f'Executing SQL query to merge into {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
@@ -395,15 +359,7 @@ class SQLMergeOperator(BaseSQLOperator):
 
         if self.source_conn:
             hook = self.hook_manager.get_hook(self.source_conn)
-            if _is_bigquery_hook(hook):
-                df = hook.get_pandas_df(self.sql, dialect='standard')
-            else:
-                # Use raw DBAPI connection for pandas with PyArrow for optimization
-                conn = hook.get_conn()
-                try:
-                    df = pd.read_sql(self.sql, conn, dtype_backend='pyarrow')
-                finally:
-                    conn.close()
+            df = _read_dataframe_from_hook(hook, self.sql)
 
             duration = time.time() - start_time
             summary = OperationSummary(
