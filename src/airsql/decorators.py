@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from airflow.sdk import get_current_context, task
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, select_autoescape
 
 from airsql.file import File
 from airsql.table import Table
@@ -26,20 +26,6 @@ class SQLDecorators:
         self.sql_files_path = sql_files_path or os.path.join(
             os.getcwd(), 'dags', 'git_sql'
         )
-
-        if os.path.exists(self.sql_files_path):
-            self.jinja_env = Environment(
-                loader=FileSystemLoader(self.sql_files_path),
-                autoescape=select_autoescape([
-                    'html',
-                    'xml',
-                    'sql',
-                ]),
-                trim_blocks=True,
-                lstrip_blocks=True,
-            )
-        else:
-            self.jinja_env = None
         self.string_jinja_env = Environment(
             loader=None, autoescape=select_autoescape(['sql'])
         )
@@ -81,12 +67,25 @@ class SQLDecorators:
         finally:
             del frame
 
-        # Fall back to the configured sql_files_path
-        if not self.jinja_env:
-            raise ValueError(f'SQL files directory not found: {self.sql_files_path}')
+        # Fall back to common SQL roots and configured sql_files_path
+        search_roots = [
+            Path.cwd(),
+            Path.cwd() / 'dags',
+            Path.cwd() / 'dags' / 'git_sql',
+            Path.cwd() / 'sql',
+            Path(self.sql_files_path),
+        ]
 
-        template = self.jinja_env.get_template(sql_file)
-        return template.render(**template_vars)
+        for root in search_roots:
+            candidate = (root / sql_file).resolve()
+            if candidate.exists():
+                file_obj = File(str(candidate), variables=template_vars)
+                return file_obj.render()
+
+        searched = ', '.join(str(p) for p in search_roots)
+        raise FileNotFoundError(
+            f"SQL file '{sql_file}' not found. Searched relative to caller and in: {searched}"
+        )
 
     def _process_sql_input(
         self,
@@ -112,12 +111,6 @@ class SQLDecorators:
         final_template_vars.update(bound_args.arguments)
 
         if sql_file_template_path:
-            if not self.jinja_env:
-                raise ValueError(
-                    f"SQL files directory '{self.sql_files_path}'"
-                    ' not found or Jinja environment '
-                    "for files not initialized, but 'sql_file' was specified."
-                )
             return self._load_sql_from_file(
                 sql_file_template_path, **final_template_vars
             )
