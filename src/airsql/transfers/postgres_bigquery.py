@@ -3,7 +3,7 @@ Enhanced PostgreSQL to BigQuery transfer operator with sensor validation
 and asset emission.
 """
 
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from airflow.models import BaseOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -45,6 +45,9 @@ class PostgresToBigQueryOperator(BaseOperator):
         create_disposition: str = 'CREATE_IF_NEEDED',
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
+        partition_by: Optional[str] = None,
+        partition_type: str = 'DAY',
+        cluster_fields: Optional[List[str]] = None,
         dry_run: bool = False,
         **kwargs,
     ):
@@ -73,7 +76,15 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.create_disposition = create_disposition
         self.emit_asset = emit_asset
         self.cleanup_temp_files = cleanup_temp_files
+        self.partition_by = partition_by
+        self.partition_type = partition_type.upper()
+        self.cluster_fields = cluster_fields or []
         self.dry_run = dry_run
+
+        if self.partition_type not in {'DAY', 'HOUR', 'MONTH', 'YEAR'}:
+            raise ValueError('partition_type must be one of: DAY, HOUR, MONTH, YEAR')
+        if self.cluster_fields and any(not f for f in self.cluster_fields):
+            raise ValueError('cluster_fields cannot contain empty values')
 
         if self.emit_asset:
             self.outlets = [Asset(f'airsql://database/{self.destination_table}')]
@@ -122,9 +133,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         actual_export_format = self.export_format
         actual_gcs_temp_path = self.gcs_temp_path
         actual_schema_filename = self.schema_filename or (
-            (self.gcs_temp_path + '.schema.json')
-            if self.export_format == 'parquet'
-            else None
+            self.gcs_temp_path + '.schema.json'
         )
 
         if self.export_format == 'parquet':
@@ -137,8 +146,9 @@ class PostgresToBigQueryOperator(BaseOperator):
                 actual_export_format = 'jsonl'
                 # Change file extension from .parquet to .jsonl
                 actual_gcs_temp_path = self.gcs_temp_path.replace('.parquet', '.jsonl')
-                # JSONL doesn't need schema file
-                actual_schema_filename = None
+                actual_schema_filename = self.schema_filename or (
+                    actual_gcs_temp_path + '.schema.json'
+                )
 
         self.log.info(
             f'Extracting data from PostgreSQL to GCS: gs://{self.gcs_bucket}/{actual_gcs_temp_path}'
@@ -188,8 +198,12 @@ class PostgresToBigQueryOperator(BaseOperator):
                 gcs_to_bq_kwargs['skip_leading_rows'] = 1
             elif actual_export_format == 'jsonl':
                 gcs_to_bq_kwargs['source_format'] = 'NEWLINE_DELIMITED_JSON'
-                # BigQuery auto-detects schema for JSONL
-                gcs_to_bq_kwargs['autodetect'] = True
+                if actual_schema_filename:
+                    gcs_to_bq_kwargs['schema_object'] = actual_schema_filename
+                    gcs_to_bq_kwargs['schema_object_bucket'] = self.gcs_bucket
+                    gcs_to_bq_kwargs['autodetect'] = False
+                else:
+                    gcs_to_bq_kwargs['autodetect'] = True
             else:  # parquet
                 gcs_to_bq_kwargs['source_format'] = 'PARQUET'
                 # If we have a schema file for parquet, pass it to BigQuery operator
@@ -198,6 +212,16 @@ class PostgresToBigQueryOperator(BaseOperator):
                     gcs_to_bq_kwargs['schema_object_bucket'] = self.gcs_bucket
                     # Prefer explicit schema over autodetect to preserve types
                     gcs_to_bq_kwargs['autodetect'] = False
+
+            if self.partition_by:
+                time_partitioning = {
+                    'type': self.partition_type,
+                    'field': self.partition_by,
+                }
+                gcs_to_bq_kwargs['time_partitioning'] = time_partitioning
+
+            if self.cluster_fields:
+                gcs_to_bq_kwargs['cluster_fields'] = self.cluster_fields
 
             gcs_to_bq = GCSToBigQueryOperator(**gcs_to_bq_kwargs)
             gcs_to_bq.execute(context)
