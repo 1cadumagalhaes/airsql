@@ -25,6 +25,7 @@ def _pa_table_to_bq_schema(
     sample_size: int = 100,
     threshold: float = 0.9,
     postgres_type_map: Optional[Dict[str, Dict]] = None,
+    json_mode: bool = False,
 ) -> List[Dict]:
     """Convert a pandas (pyarrow-backed) DataFrame or pyarrow.Table to BigQuery schema.
 
@@ -52,6 +53,8 @@ def _pa_table_to_bq_schema(
                 return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
             # arrays: typname starting with '_' or typelem provided
             if pg_info.get('is_array'):
+                if json_mode:
+                    return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
                 # map element type
                 elem_typname = pg_info.get('element_typname')
                 # if element is composite/record treat as RECORD REPEATED
@@ -70,6 +73,8 @@ def _pa_table_to_bq_schema(
 
         # LIST / REPEATED
         if pa.types.is_list(typ) or pa.types.is_large_list(typ):
+            if json_mode:
+                return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
             value_type = typ.value_type
             # nested list of structs -> RECORD REPEATED
             if pa.types.is_struct(value_type):
@@ -86,6 +91,8 @@ def _pa_table_to_bq_schema(
 
         # STRUCT / RECORD
         if pa.types.is_struct(typ):
+            if json_mode:
+                return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
             fields = [_field_to_bq(sub) for sub in typ]
             return {
                 'name': name,
@@ -522,6 +529,7 @@ class PostgresToGCSOperator(BaseOperator):
                     schema_source_df,
                     detect_json=False,
                     postgres_type_map=postgres_type_map,
+                    json_mode=(export_format == 'jsonl'),
                 )
                 gcs_hook.upload(
                     bucket_name=self.bucket,
