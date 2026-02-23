@@ -43,6 +43,31 @@ def _pa_table_to_bq_schema(
         name = field.name
         typ = field.type
 
+        # If we have Postgres metadata for this column, prefer it first
+        if postgres_type_map and name in postgres_type_map:
+            pg_info = postgres_type_map[name]
+            pg_typname = pg_info.get('typname')
+            # json/jsonb -> JSON
+            if pg_typname in {'json', 'jsonb'}:
+                return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
+            # arrays: typname starting with '_' or typelem provided
+            if pg_info.get('is_array'):
+                # map element type
+                elem_typname = pg_info.get('element_typname')
+                # if element is composite/record treat as RECORD REPEATED
+                if elem_typname and elem_typname not in {
+                    'int4',
+                    'text',
+                    'varchar',
+                    'numeric',
+                    'json',
+                    'jsonb',
+                }:
+                    return {'name': name, 'type': 'RECORD', 'mode': 'REPEATED'}
+                # otherwise map using simple mapping
+                mapped = _simple_type(typ)
+                return {'name': name, 'type': mapped, 'mode': 'REPEATED'}
+
         # LIST / REPEATED
         if pa.types.is_list(typ) or pa.types.is_large_list(typ):
             value_type = typ.value_type
@@ -68,32 +93,6 @@ def _pa_table_to_bq_schema(
                 'mode': 'NULLABLE',
                 'fields': fields,
             }
-
-        # SIMPLE TYPES
-        # If we have Postgres metadata for this column, prefer it
-        if postgres_type_map and name in postgres_type_map:
-            pg_info = postgres_type_map[name]
-            pg_typname = pg_info.get('typname')
-            # json/jsonb -> JSON
-            if pg_typname in {'json', 'jsonb'}:
-                return {'name': name, 'type': 'JSON', 'mode': 'NULLABLE'}
-            # arrays: typname starting with '_' or typelem provided
-            if pg_info.get('is_array'):
-                # map element type
-                elem_typname = pg_info.get('element_typname')
-                # if element is composite/record treat as RECORD REPEATED
-                if elem_typname and elem_typname not in {
-                    'int4',
-                    'text',
-                    'varchar',
-                    'numeric',
-                    'json',
-                    'jsonb',
-                }:
-                    return {'name': name, 'type': 'RECORD', 'mode': 'REPEATED'}
-                # otherwise map using simple mapping
-                mapped = _simple_type(typ)
-                return {'name': name, 'type': mapped, 'mode': 'REPEATED'}
 
         bq_type = _simple_type(typ)
 
@@ -366,7 +365,12 @@ class PostgresToGCSOperator(BaseOperator):
                         mime_type = 'text/csv'
                     elif export_format == 'jsonl':
                         with open(tmp_path, 'a', encoding='utf-8') as f:
-                            fixed_chunk.to_json(f, orient='records', lines=True)
+                            fixed_chunk.to_json(
+                                f,
+                                orient='records',
+                                lines=True,
+                                date_format='iso',
+                            )
                         mime_type = 'application/x-ndjson'
                     else:
                         table = pa.Table.from_pandas(fixed_chunk, preserve_index=False)
@@ -433,7 +437,12 @@ class PostgresToGCSOperator(BaseOperator):
                 mime_type = 'text/csv'
             elif export_format == 'jsonl':
                 data_buffer = StringIO()
-                df.to_json(data_buffer, orient='records', lines=True)
+                df.to_json(
+                    data_buffer,
+                    orient='records',
+                    lines=True,
+                    date_format='iso',
+                )
                 data_bytes = data_buffer.getvalue().encode('utf-8')
                 mime_type = 'application/x-ndjson'
             else:
@@ -451,8 +460,7 @@ class PostgresToGCSOperator(BaseOperator):
             file_size_mb = len(data_bytes) / (1024 * 1024)
 
         # If requested, generate and upload a BigQuery-compatible schema JSON
-        # Schema generation is only for Parquet format, not JSONL (BigQuery auto-detects JSONL)
-        if self.schema_filename and export_format == 'parquet':
+        if self.schema_filename:
             try:
                 self.log.info(
                     'Generating BigQuery schema file: %s', self.schema_filename
