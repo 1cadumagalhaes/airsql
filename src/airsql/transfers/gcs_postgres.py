@@ -103,10 +103,14 @@ class GCSToPostgresOperator(BaseOperator):
             filename: The file path/name to detect format from
 
         Returns:
-            'parquet' or 'csv'
+            'parquet', 'jsonl', 'avro', or 'csv'
         """
         if filename.endswith('.parquet'):
             return 'parquet'
+        if filename.endswith('.jsonl'):
+            return 'jsonl'
+        if filename.endswith('.avro'):
+            return 'avro'
         return 'csv'
 
     def execute(self, context):  # noqa: PLR0912, PLR0914
@@ -124,6 +128,13 @@ class GCSToPostgresOperator(BaseOperator):
         file_format = self._detect_file_format(self.object_name)
         if file_format == 'parquet':
             df = pd.read_parquet(BytesIO(file_data), engine='pyarrow')
+        elif file_format == 'jsonl':
+            df = pd.read_json(BytesIO(file_data), lines=True, dtype_backend='pyarrow')
+        elif file_format == 'avro':
+            from pyarrow import avro  # noqa: PLC0415
+
+            table = avro.read_table(BytesIO(file_data))
+            df = table.to_pandas()
         else:  # csv
             df = pd.read_csv(
                 StringIO(file_data.decode('utf-8')), dtype_backend='pyarrow'
