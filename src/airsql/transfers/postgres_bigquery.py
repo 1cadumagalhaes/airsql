@@ -40,6 +40,8 @@ class PostgresToBigQueryOperator(BaseOperator):
         export_format: str = 'parquet',
         schema_filename: Optional[str] = None,
         pandas_chunksize: int = 100000,
+        use_copy: bool = False,
+        use_temp_file: bool = False,
         check_source_exists: bool = True,
         source_table_check_sql: Optional[str] = None,
         write_disposition: str = 'WRITE_TRUNCATE',
@@ -61,6 +63,8 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.export_format = export_format.lower()
         self.schema_filename = schema_filename
         self.pandas_chunksize = pandas_chunksize
+        self.use_copy = use_copy
+        self.use_temp_file = use_temp_file
         # Generate temp path with appropriate extension
         if self.export_format == 'parquet':
             file_ext = '.parquet'
@@ -168,6 +172,8 @@ class PostgresToBigQueryOperator(BaseOperator):
             export_format=actual_export_format,
             schema_filename=actual_schema_filename,
             pandas_chunksize=self.pandas_chunksize,
+            use_copy=self.use_copy,
+            use_temp_file=self.use_temp_file,
             dry_run=self.dry_run,
         )
         pg_to_gcs.execute(context)
