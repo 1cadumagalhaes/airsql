@@ -143,6 +143,7 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         dry_run: bool = False,
+        pre_truncate: bool = False,
         **template_vars,
     ) -> Callable:
         """Decorator for SQL queries.
@@ -152,6 +153,7 @@ class SQLDecorators:
             source_conn: Connection ID for simple queries without table parameters
             sql_file: Path to SQL file (relative to sql_files_path)
             dry_run: If True, simulate the operation without writing data
+            pre_truncate: If True, truncate table before writing
             **template_vars: Variables to pass to Jinja template. Non-Jinja
                             variables are passed as kwargs to the operator for
                             dynamic task naming.
@@ -179,12 +181,11 @@ class SQLDecorators:
                     output_table=output_table,
                     source_conn=source_conn,
                     dry_run=dry_run,
+                    pre_truncate=pre_truncate,
                     **op_kwargs,
                 )
 
                 return operator
-
-            return wrapper
 
         return decorator
 

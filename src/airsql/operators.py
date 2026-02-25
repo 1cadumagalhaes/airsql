@@ -79,11 +79,13 @@ class SQLQueryOperator(BaseSQLOperator):
         output_table: Table,
         source_conn: Optional[str] = None,
         dry_run: bool = False,
+        pre_truncate: bool = False,
         **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
         self.dry_run = dry_run
+        self.pre_truncate = pre_truncate
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and write to the output table."""
@@ -106,7 +108,10 @@ class SQLQueryOperator(BaseSQLOperator):
 
             if not self.dry_run:
                 self.log.info(f'Query returned {len(df)} rows')
-                self.hook_manager.write_dataframe_to_table(df, self.output_table)
+                if_exists = 'truncate' if self.pre_truncate else 'append'
+                self.hook_manager.write_dataframe_to_table(
+                    df, self.output_table, if_exists=if_exists
+                )
                 self.log.info(f'Successfully wrote {len(df)} rows')
             else:
                 self.log.info(
@@ -172,6 +177,11 @@ class SQLAppendOperator(BaseSQLOperator):
                 )
 
             self.log.info(summary.to_log_summary())
+
+            # Drop temporary table after append if marked as temporary
+            if self.output_table.temporary:
+                self.log.info(f'Dropping temporary table: {self.output_table}')
+                self.hook_manager.drop_table(self.output_table)
         else:
             raise ValueError(
                 f'source_conn is required for {self.__class__.__name__}. '
@@ -319,6 +329,11 @@ class SQLTruncateOperator(BaseSQLOperator):
                 )
 
             self.log.info(summary.to_log_summary())
+
+            # Drop temporary table after truncate/reload if marked as temporary
+            if self.output_table.temporary:
+                self.log.info(f'Dropping temporary table: {self.output_table}')
+                self.hook_manager.drop_table(self.output_table)
         else:
             raise ValueError(
                 f'source_conn is required for {self.__class__.__name__}. '
@@ -400,6 +415,11 @@ class SQLMergeOperator(BaseSQLOperator):
                 )
 
             self.log.info(summary.to_log_summary())
+
+            # Drop temporary table after merge if marked as temporary
+            if self.output_table.temporary:
+                self.log.info(f'Dropping temporary table: {self.output_table}')
+                self.hook_manager.drop_table(self.output_table)
         else:
             raise ValueError(
                 f'source_conn is required for {self.__class__.__name__}. '
@@ -470,6 +490,11 @@ class DataFrameLoadOperator(BaseOperator):
             )
 
         self.log.info(summary.to_log_summary())
+
+        # Drop temporary table after load if marked as temporary
+        if self.output_table.temporary:
+            self.log.info(f'Dropping temporary table: {self.output_table}')
+            self.hook_manager.drop_table(self.output_table)
 
 
 class DataFrameMergeOperator(BaseOperator):
@@ -546,6 +571,11 @@ class DataFrameMergeOperator(BaseOperator):
             )
 
         self.log.info(summary.to_log_summary())
+
+        # Drop temporary table after merge if marked as temporary
+        if self.output_table.temporary:
+            self.log.info(f'Dropping temporary table: {self.output_table}')
+            self.hook_manager.drop_table(self.output_table)
 
 
 class SQLCheckOperator(BaseSQLCheckOperator):

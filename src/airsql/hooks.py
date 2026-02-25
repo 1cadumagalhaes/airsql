@@ -6,6 +6,7 @@ import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import get_current_context
 from airflow.sdk.bases.hook import BaseHook
 
@@ -218,6 +219,47 @@ class SQLHookManager:
                 raise ValueError(
                     f'Unsupported database type for table: {table}. Error getting connection: {e}'
                 ) from e
+
+    def drop_table(self, table: Table) -> None:
+        """Drop a table (for temporary tables cleanup)."""
+        if not table.temporary:
+            self.log.info(f'Table {table} is not marked as temporary, skipping drop')
+            return
+
+        if table.is_bigquery:
+            try:
+                from google.cloud import bigquery  # noqa: PLC0415
+
+                client = bigquery.Client()
+                table_ref = client.dataset(table.dataset).table(table.table_name)
+                client.delete_table(table_ref)
+                self.log.info(f'Dropped BigQuery table: {table}')
+            except Exception as e:
+                self.log.error(f'Failed to drop BigQuery table {table}: {e}')
+                raise
+        elif table.is_postgres:
+            try:
+                hook = PostgresHook(postgres_conn_id=table.conn_id)
+                conn = hook.get_conn()
+                cursor = conn.cursor()
+
+                schema, table_name = (
+                    table.table_name.split('.', 1)
+                    if '.' in table.table_name
+                    else ('public', table.table_name)
+                )
+
+                drop_sql = f'DROP TABLE IF EXISTS {schema}.{table_name}'
+                cursor.execute(drop_sql)
+                conn.commit()
+                cursor.close()
+                conn.close()
+                self.log.info(f'Dropped Postgres table: {schema}.{table_name}')
+            except Exception as e:
+                self.log.error(f'Failed to drop Postgres table {table}: {e}')
+                raise
+        else:
+            self.log.warning(f'Drop not supported for table type: {table}')
 
     @staticmethod
     def _get_bigquery_schema(hook: Any, table: Table) -> List[Dict[str, Any]]:

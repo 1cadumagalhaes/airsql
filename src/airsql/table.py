@@ -57,6 +57,10 @@ class Table(BaseModel):
     )
     location: Optional[str] = Field(None, description='BigQuery location/region')
     temporary: bool = Field(False, description='Whether this is a temporary table')
+    temp_schema: Optional[str] = Field(
+        None,
+        description='Schema for temporary tables (Postgres). E.g., "temp" to create tables in temp schema',
+    )
     date_range: Optional[Tuple[str, str]] = Field(
         None, description='Date range for sharded tables (start, end)'
     )
