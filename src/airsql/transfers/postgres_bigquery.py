@@ -9,6 +9,13 @@ from airflow.models import BaseOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import Asset, Context
 
+from airsql.enums import (
+    CreateDisposition,
+    PartitionType,
+    PostgresExportFormat,
+    WriteDisposition,
+)
+
 # Constants for destination table parsing
 _FULL_TABLE_PARTS = 3  # project.dataset.table
 _PARTIAL_TABLE_PARTS = 2  # dataset.table
@@ -37,24 +44,33 @@ class PostgresToBigQueryOperator(BaseOperator):
         gcp_conn_id: str = 'google_cloud_default',
         gcs_bucket: str,
         gcs_temp_path: Optional[str] = None,
-        export_format: str = 'parquet',
+        export_format: str = PostgresExportFormat.CSV,
         schema_filename: Optional[str] = None,
         pandas_chunksize: int = 100000,
         use_copy: bool = False,
         use_temp_file: bool = False,
         check_source_exists: bool = True,
         source_table_check_sql: Optional[str] = None,
-        write_disposition: str = 'WRITE_TRUNCATE',
-        create_disposition: str = 'CREATE_IF_NEEDED',
+        write_disposition: str = WriteDisposition.WRITE_TRUNCATE,
+        create_disposition: str = CreateDisposition.CREATE_IF_NEEDED,
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
         partition_by: Optional[str] = None,
-        partition_type: str = 'DAY',
+        partition_type: str = PartitionType.DAY,
         cluster_fields: Optional[List[str]] = None,
         dry_run: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        # Validate export format
+        if export_format not in PostgresExportFormat.values():
+            raise ValueError(
+                f"Invalid export_format: '{export_format}'. "
+                f'Supported formats: {PostgresExportFormat.values()}. '
+                f'Note: Parquet is not supported for Postgres export.'
+            )
+
         self.postgres_conn_id = postgres_conn_id
         self.sql = sql or f'SELECT * FROM {source_project_dataset_table}'  # noqa: S608
         self.destination_table = destination_project_dataset_table
@@ -142,7 +158,28 @@ class PostgresToBigQueryOperator(BaseOperator):
             self.gcs_temp_path + '.schema.json'
         )
 
-        if self.export_format == 'parquet':
+        # COPY mode produces CSV/JSONL, not parquet
+        if self.use_copy:
+            # JSON columns detection still applies
+            pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
+            json_columns = self._detect_json_columns(pg_hook)
+            if json_columns:
+                actual_export_format = 'jsonl'
+                actual_gcs_temp_path = self.gcs_temp_path.replace('.parquet', '.jsonl')
+                actual_schema_filename = self.schema_filename or (
+                    actual_gcs_temp_path + '.schema.json'
+                )
+                self.log.info(
+                    f'Detected JSON columns: {json_columns}. Using JSONL format.'
+                )
+            else:
+                actual_export_format = 'csv'
+                actual_gcs_temp_path = self.gcs_temp_path.replace('.parquet', '.csv')
+                actual_schema_filename = self.schema_filename or (
+                    actual_gcs_temp_path + '.schema.json'
+                )
+                self.log.info('Using COPY mode: CSV format.')
+        elif self.export_format == 'parquet':
             pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
             json_columns = self._detect_json_columns(pg_hook)
             if json_columns:

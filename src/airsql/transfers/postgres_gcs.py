@@ -16,6 +16,7 @@ from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
+from airsql.enums import PostgresExportFormat, SchemaDetectionMode
 from airsql.utils import DataValidator, OperationSummary, ValidationResult
 
 
@@ -272,7 +273,7 @@ class PostgresToGCSOperator(BaseOperator):
         bucket: str,
         filename: str,
         gcp_conn_id: str = 'google_cloud_default',
-        export_format: str = 'parquet',
+        export_format: str = PostgresExportFormat.CSV,
         schema_filename: Optional[str] = None,
         pandas_chunksize: Optional[int] = None,
         use_copy: bool = False,
@@ -280,14 +281,29 @@ class PostgresToGCSOperator(BaseOperator):
         csv_kwargs: Optional[dict] = None,
         parquet_kwargs: Optional[dict] = None,
         # How to detect JSON/complex types for schema generation.
-        # Options: 'postgres' (use Postgres metadata), 'sampling' (sample values), 'none' (no JSON detection)
-        schema_detection_mode: str = 'postgres',
+        schema_detection_mode: str = SchemaDetectionMode.POSTGRES,
         sampling_size: int = 100,
         sampling_threshold: float = 0.9,
         dry_run: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+
+        # Validate export format
+        if export_format not in PostgresExportFormat.values():
+            raise ValueError(
+                f"Invalid export_format: '{export_format}'. "
+                f'Supported formats: {PostgresExportFormat.values()}. '
+                f'Note: Parquet is not supported for Postgres export.'
+            )
+
+        # Validate schema detection mode
+        if schema_detection_mode not in SchemaDetectionMode.values():
+            raise ValueError(
+                f"Invalid schema_detection_mode: '{schema_detection_mode}'. "
+                f'Supported modes: {SchemaDetectionMode.values()}'
+            )
+
         self.postgres_conn_id = postgres_conn_id
         self.sql = sql
         self.bucket = bucket
@@ -636,8 +652,15 @@ class PostgresToGCSOperator(BaseOperator):
                 self.filename = f'{base_name}.jsonl'
                 self.log.info(f'Updated filename to: {self.filename}')
 
-            # Store actual format for downstream operators
-            self.actual_export_format = export_format
+            # COPY produces CSV or JSONL, not parquet
+            if use_jsonl:
+                self.actual_export_format = 'jsonl'
+            else:
+                self.actual_export_format = 'csv'
+                # Update filename to .csv if it was .parquet
+                if self.filename.endswith('.parquet'):
+                    self.filename = self.filename[:-8] + '.csv'
+                    self.log.info(f'Updated filename to: {self.filename}')
 
             if json_columns and self.export_format != 'jsonl':
                 self.log.info(

@@ -542,12 +542,13 @@ WHEN NOT MATCHED THEN
             data_tuples = [tuple(x) for x in df_filtered[common_columns].to_numpy()]
 
             insert_sql = psycopg_sql.SQL(
-                'INSERT INTO {table} ({columns}) VALUES %s'
+                'INSERT INTO {table} ({columns}) VALUES ({placeholders})'
             ).format(
                 table=table_identifier,
                 columns=psycopg_sql.SQL(', ').join([
                     psycopg_sql.Identifier(col) for col in common_columns
                 ]),
+                placeholders=', '.join(['%s'] * len(common_columns)),
             )
 
             conflict_sql_part = psycopg_sql.SQL(

@@ -3,6 +3,8 @@ from typing import Any, List, Optional, Set
 from airflow.models import BaseOperator
 from airflow.sdk import Asset, Context
 
+from airsql.enums import BigQueryExportFormat
+
 
 class BigQueryToPostgresOperator(BaseOperator):
     """
@@ -51,7 +53,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         gcp_conn_id: str = 'google_cloud_default',
         gcs_bucket: str,
         gcs_temp_path: Optional[str] = None,
-        export_format: str = 'parquet',
+        export_format: str = BigQueryExportFormat.PARQUET,
         auto_detect_json_columns: bool = True,
         check_source_exists: bool = True,
         source_table_check_sql: Optional[str] = None,

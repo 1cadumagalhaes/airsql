@@ -221,7 +221,6 @@ class GCSToPostgresOperator(BaseOperator):
                     index=False,
                     method='multi',
                     chunksize=1000,
-                    dtype_backend='pyarrow',
                 )
                 self.log.info('Append to Postgres complete.')
             else:
