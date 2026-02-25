@@ -539,7 +539,13 @@ WHEN NOT MATCHED THEN
                         f'Update columns not found in table: {missing_in_table}'
                     )
                 update_cols = update_columns
-            data_tuples = [tuple(x) for x in df_filtered[common_columns].to_numpy()]
+
+            # Convert DataFrame to tuples, handling pandas NA values for psycopg3
+            import numpy as np  # noqa: PLC0415
+            import pandas as pd  # noqa: PLC0415
+
+            df_clean = df_filtered[common_columns].replace({pd.NA: None, np.nan: None})
+            data_tuples = [tuple(x) for x in df_clean.values.tolist()]
 
             insert_sql = psycopg_sql.SQL(
                 'INSERT INTO {table} ({columns}) VALUES ({placeholders})'
