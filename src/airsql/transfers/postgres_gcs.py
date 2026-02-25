@@ -314,6 +314,9 @@ class PostgresToGCSOperator(BaseOperator):
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
 
         self.log.info(f'Extracting data from Postgres using query: {self.sql}')
+        self.log.info(
+            f'Using pandas_chunksize={self.pandas_chunksize} for chunked extraction'
+        )
         engine = pg_hook.get_sqlalchemy_engine()
 
         json_columns = self._detect_json_columns(pg_hook)
@@ -358,6 +361,9 @@ class PostgresToGCSOperator(BaseOperator):
 
                     fixed_chunk = self._fix_timestamp_precision(chunk)
                     rows_extracted += len(fixed_chunk)
+                    self.log.info(
+                        f'Processed chunk: {len(fixed_chunk)} rows (total: {rows_extracted})'
+                    )
                     if schema_source_df is None:
                         schema_source_df = fixed_chunk
 
