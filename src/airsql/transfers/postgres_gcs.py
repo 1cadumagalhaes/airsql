@@ -443,25 +443,17 @@ class PostgresToGCSOperator(BaseOperator):
             bucket = gcs_client.bucket(self.bucket)
             blob = bucket.blob(self.filename)
 
-            # Stream directly to GCS using BlobWriter
+            # Stream directly to GCS using psycopg3 cursor.copy()
             rows_count = 0
             with BlobWriter(blob) as writer:
                 with cursor.copy(copy_sql) as copy:
                     for row in copy:
                         if use_jsonl:
-                            # row is already a string from row_to_json
                             writer.write((row + '\n').encode('utf-8'))
                         else:
-                            # For CSV, join values
-                            writer.write(
-                                (
-                                    ','.join('' if v is None else str(v) for v in row)
-                                    + '\n'
-                                ).encode('utf-8')
-                            )
+                            writer.write((row + '\n').encode('utf-8'))
                         rows_count += 1
 
-                        # Log progress every million rows
                         if rows_count % 1000000 == 0:
                             self.log.info(f'COPY progress: {rows_count} rows extracted')
 
@@ -631,9 +623,15 @@ class PostgresToGCSOperator(BaseOperator):
                 schema_data = _build_schema_from_column_types(
                     column_types, json_columns
                 )
-                schema_filename = self.schema_filename or (
-                    self.filename + '.schema.json'
-                )
+                if self.schema_filename:
+                    schema_filename = self.schema_filename
+                else:
+                    # Use actual export format extension
+                    base_filename = self.filename
+                    if '.' in base_filename:
+                        name_parts = base_filename.rsplit('.', 1)
+                        base_filename = name_parts[0]
+                    schema_filename = f'{base_filename}.{export_format}.schema.json'
                 self.log.info(f'Generating schema file: {schema_filename}')
                 schema_json = json.dumps(schema_data, indent=2)
                 gcs_hook.upload(
