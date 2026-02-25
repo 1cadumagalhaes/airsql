@@ -447,11 +447,13 @@ class PostgresToGCSOperator(BaseOperator):
             rows_count = 0
             with BlobWriter(blob) as writer:
                 with cursor.copy(copy_sql) as copy:
-                    for row in copy:
-                        if use_jsonl:
-                            writer.write((row + '\n').encode('utf-8'))
+                    for raw_row in copy:
+                        # raw_row is memoryview/bytes in psycopg3, convert to bytes
+                        if isinstance(raw_row, memoryview):
+                            row_bytes = raw_row.tobytes()
                         else:
-                            writer.write((row + '\n').encode('utf-8'))
+                            row_bytes = raw_row
+                        writer.write(row_bytes)
                         rows_count += 1
 
                         if rows_count % 1000000 == 0:
