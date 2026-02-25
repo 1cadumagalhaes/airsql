@@ -259,24 +259,32 @@ class GCSToPostgresOperator(BaseOperator):
                 psycopg_sql.Identifier(col) for col in df_filtered.columns
             ]
 
-            insert_sql = psycopg_sql.SQL(
-                'INSERT INTO {table} ({columns}) VALUES %s'
-            ).format(
-                table=table_identifier,
-                columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
-            )
-
             data_tuples = self._dataframe_to_tuples(df_filtered)
 
             if USE_PSYCOPG3:
-                # Use executemany for psycopg3
-                for i in range(0, len(data_tuples), 1000):
-                    batch = data_tuples[i : i + 1000]
-                    cursor.executemany(insert_sql.as_string(cursor), batch)
+                # Use COPY FROM for psycopg3 - much faster than executemany
+                copy_sql = psycopg_sql.SQL(
+                    'COPY {table} ({columns}) FROM STDIN'
+                ).format(
+                    table=table_identifier,
+                    columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
+                )
+                with cursor.copy(copy_sql.as_string(cursor)) as copy:
+                    for row in data_tuples:
+                        copy.write_row(row)
             else:
+                # For psycopg2, use execute_values
+                from psycopg2.extras import execute_values  # noqa: PLC0415
+
+                insert_sql_psycopg2 = psycopg_sql.SQL(
+                    'INSERT INTO {table} ({columns}) VALUES %s'
+                ).format(
+                    table=table_identifier,
+                    columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
+                )
                 execute_values(
                     cursor,
-                    insert_sql.as_string(cursor),
+                    insert_sql_psycopg2.as_string(cursor),
                     data_tuples,
                     page_size=1000,
                 )
@@ -340,11 +348,13 @@ class GCSToPostgresOperator(BaseOperator):
                     psycopg_sql.SQL(', ').join(set_statements)
                 )
 
+            placeholders = ', '.join(['%s'] * len(df_filtered.columns))
             insert_sql = psycopg_sql.SQL(
-                'INSERT INTO {table} ({columns}) VALUES %s'
+                'INSERT INTO {table} ({columns}) VALUES ({placeholders})'
             ).format(
                 table=table_identifier,
                 columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
+                placeholders=placeholders,
             )
 
             conflict_sql_part = psycopg_sql.SQL(
@@ -360,13 +370,26 @@ class GCSToPostgresOperator(BaseOperator):
             data_tuples = self._dataframe_to_tuples(df_filtered)
 
             if USE_PSYCOPG3:
+                # COPY FROM doesn't support ON CONFLICT, use executemany for upserts
                 for i in range(0, len(data_tuples), 1000):
                     batch = data_tuples[i : i + 1000]
                     cursor.executemany(final_sql_query.as_string(cursor), batch)
             else:
+                # For psycopg2, convert to VALUES format for execute_values
+                insert_sql_psycopg2 = psycopg_sql.SQL(
+                    'INSERT INTO {table} ({columns}) VALUES %s'
+                ).format(
+                    table=table_identifier,
+                    columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
+                )
+                final_sql_query_psycopg2 = psycopg_sql.SQL(' ').join([
+                    insert_sql_psycopg2,
+                    conflict_sql_part,
+                    update_sql_part,
+                ])
                 execute_values(
                     cursor,
-                    final_sql_query.as_string(cursor),
+                    final_sql_query_psycopg2.as_string(cursor),
                     data_tuples,
                     page_size=1000,
                 )
