@@ -18,6 +18,53 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from airsql.utils import DataValidator, OperationSummary, ValidationResult
 
+# PostgreSQL to BigQuery type mapping
+POSTGRES_TO_BQ_TYPE_MAP = {
+    'bool': 'BOOL',
+    'bytea': 'BYTES',
+    'date': 'DATE',
+    'float4': 'FLOAT',
+    'float8': 'FLOAT',
+    'int2': 'INTEGER',
+    'int4': 'INTEGER',
+    'int8': 'INTEGER',
+    'json': 'JSON',
+    'jsonb': 'JSON',
+    'numeric': 'NUMERIC',
+    'text': 'STRING',
+    'varchar': 'STRING',
+    'timestamp': 'TIMESTAMP',
+    'timestamptz': 'TIMETIME',
+    'time': 'TIME',
+    'timetz': 'TIME',
+    'uuid': 'STRING',
+    'inet': 'STRING',
+    'cidr': 'STRING',
+    'macaddr': 'STRING',
+}
+
+
+def _build_schema_from_column_types(
+    column_types: Dict[str, str], json_columns: set
+) -> List[Dict]:
+    """Build BigQuery schema from PostgreSQL column types.
+
+    Args:
+        column_types: Dict of column names to PostgreSQL data types
+        json_columns: Set of column names that are JSON/JSONB type
+
+    Returns:
+        List of dicts compatible with BigQuery load schema
+    """
+    schema = []
+    for col_name, col_type in column_types.items():
+        if col_name in json_columns:
+            schema.append({'name': col_name, 'type': 'JSON', 'mode': 'NULLABLE'})
+        else:
+            bq_type = POSTGRES_TO_BQ_TYPE_MAP.get(col_type, 'STRING')
+            schema.append({'name': col_name, 'type': bq_type, 'mode': 'NULLABLE'})
+    return schema
+
 
 def _pa_table_to_bq_schema(
     df,
@@ -222,6 +269,8 @@ class PostgresToGCSOperator(BaseOperator):
         export_format: str = 'parquet',
         schema_filename: Optional[str] = None,
         pandas_chunksize: Optional[int] = None,
+        use_copy: bool = False,
+        use_temp_file: bool = False,
         csv_kwargs: Optional[dict] = None,
         parquet_kwargs: Optional[dict] = None,
         # How to detect JSON/complex types for schema generation.
@@ -241,6 +290,8 @@ class PostgresToGCSOperator(BaseOperator):
         self.export_format = export_format.lower()
         self.schema_filename = schema_filename
         self.pandas_chunksize = pandas_chunksize
+        self.use_copy = use_copy
+        self.use_temp_file = use_temp_file
         self.csv_kwargs = csv_kwargs or {}
         self.parquet_kwargs = parquet_kwargs or {}
         self.schema_detection_mode = schema_detection_mode
@@ -284,6 +335,233 @@ class PostgresToGCSOperator(BaseOperator):
 
         return json_columns
 
+    def _get_column_types(self, pg_hook) -> Dict[str, str]:
+        """Get column types from the source PostgreSQL query.
+
+        Returns a dict of {column_name: data_type}.
+        """
+        column_types: Dict[str, str] = {}
+        try:
+            type_query = f'SELECT * FROM ({self.sql}) AS subquery LIMIT 0'  # noqa: S608
+            conn = pg_hook.get_conn()
+            cur = conn.cursor()
+            cur.execute(type_query)
+            desc = cur.description
+
+            for d in desc:
+                col_name = d[0]
+                type_oid = d[1]
+                cur2 = conn.cursor()
+                cur2.execute(
+                    'SELECT typname FROM pg_type WHERE oid = %s',
+                    (type_oid,),
+                )
+                row = cur2.fetchone()
+                if row:
+                    column_types[col_name] = row[0]
+                cur2.close()
+            cur.close()
+        except Exception as e:
+            self.log.warning(f'Failed to get column types: {e}')
+
+        return column_types
+
+    def _build_copy_query(self, column_types: Dict[str, str], json_columns: set) -> str:
+        """Build COPY TO query with proper type handling.
+
+        Args:
+            column_types: Dict of column names to PostgreSQL data types
+            json_columns: Set of column names that are JSON/JSONB type
+
+        Returns:
+            COPY TO SQL query string
+        """
+        # Determine if we need JSONL format
+        use_jsonl = bool(json_columns) or self.export_format == 'jsonl'
+
+        if use_jsonl:
+            # For JSONL, use row_to_json to convert entire row to JSON
+            # This handles all types including JSON columns properly
+            return f'SELECT row_to_json(t) FROM ({self.sql}) AS t'  # noqa: S608
+
+        # For CSV format, build column list with proper escaping
+        # Handle special types that need casting to text
+        postgres_text_types = {'uuid', 'inet', 'cidr', 'macaddr'}
+        columns = []
+
+        for col_name, col_type in column_types.items():
+            quoted_col = f'"{col_name}"' if col_name.lower() != col_name else col_name
+            if col_type in postgres_text_types:
+                columns.append(f'CAST({quoted_col} AS TEXT) AS {quoted_col}')
+            else:
+                columns.append(quoted_col)
+
+        columns_str = ', '.join(columns)
+        return f'SELECT {columns_str} FROM ({self.sql}) AS subquery'  # noqa: S608
+
+    def _stream_copy_to_gcs(
+        self, pg_hook, gcs_hook, copy_query: str, use_jsonl: bool
+    ) -> int:
+        """Stream data from PostgreSQL to GCS using COPY TO.
+
+        Args:
+            pg_hook: PostgresHook instance
+            gcs_hook: GCSHook instance
+            copy_query: The COPY TO SQL query
+            use_jsonl: Whether to use JSONL format
+
+        Returns:
+            Number of rows extracted
+        """
+        from google.cloud.storage import BlobWriter  # noqa: PLC0415
+        from google.cloud.storage import Client as GCSClient  # noqa: PLC0415
+
+        conn = pg_hook.get_conn()
+        cursor = conn.cursor()
+
+        try:
+            # Determine format for COPY
+            if use_jsonl:
+                copy_sql = f'COPY ({copy_query}) TO STDOUT'
+            else:
+                copy_sql = (
+                    f'COPY ({copy_query}) TO STDOUT WITH (FORMAT CSV, HEADER true)'
+                )
+
+            # Get GCS client for streaming upload
+            gcs_client = GCSClient()
+            bucket = gcs_client.bucket(self.bucket)
+            blob = bucket.blob(self.filename)
+
+            # Stream directly to GCS using BlobWriter
+            rows_count = 0
+            with BlobWriter(blob) as writer:
+                with cursor.copy(copy_sql) as copy:
+                    for row in copy:
+                        if use_jsonl:
+                            # row is already a string from row_to_json
+                            writer.write((row + '\n').encode('utf-8'))
+                        else:
+                            # For CSV, join values
+                            writer.write(
+                                (
+                                    ','.join('' if v is None else str(v) for v in row)
+                                    + '\n'
+                                ).encode('utf-8')
+                            )
+                        rows_count += 1
+
+                        # Log progress every million rows
+                        if rows_count % 1000000 == 0:
+                            self.log.info(f'COPY progress: {rows_count} rows extracted')
+
+            self.log.info(
+                f'Uploaded {rows_count} rows to GCS: gs://{self.bucket}/{self.filename}'
+            )
+
+            return rows_count
+
+        finally:
+            cursor.close()
+            conn.close()
+
+    def _stream_copy_to_gcs_with_temp_file(
+        self,
+        pg_hook,
+        gcs_hook,
+        copy_query: str,
+        use_jsonl: bool,
+        column_names: List[str],
+    ) -> int:
+        """Stream data from PostgreSQL to GCS using COPY TO with temp file.
+
+        This is a fallback for environments where direct streaming doesn't work.
+
+        Args:
+            pg_hook: PostgresHook instance
+            gcs_hook: GCSHook instance
+            copy_query: The COPY TO SQL query
+            use_jsonl: Whether to use JSONL format
+            column_names: List of column names for CSV header
+
+        Returns:
+            Number of rows extracted
+        """
+
+        conn = pg_hook.get_conn()
+        cursor = conn.cursor()
+
+        try:
+            # Determine format for COPY
+            if use_jsonl:
+                copy_sql = f'COPY ({copy_query}) TO STDOUT'
+                mime_type = 'application/x-ndjson'
+                suffix = '.jsonl'
+            else:
+                copy_sql = (
+                    f'COPY ({copy_query}) TO STDOUT WITH (FORMAT CSV, HEADER false)'
+                )
+                mime_type = 'text/csv'
+                suffix = '.csv'
+
+            # Use temp file for streaming
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp_path = tmp.name
+
+            try:
+                rows_count = 0
+                with open(tmp_path, 'wb') as f:
+                    # Write CSV header if not JSONL
+                    if not use_jsonl and column_names:
+                        f.write((','.join(column_names) + '\n').encode('utf-8'))
+
+                    with cursor.copy(copy_sql) as copy:
+                        for row in copy:
+                            if use_jsonl:
+                                # row is already a string from row_to_json
+                                f.write((row + '\n').encode('utf-8'))
+                            else:
+                                # For CSV, join values
+                                f.write(
+                                    (
+                                        ','.join(
+                                            '' if v is None else str(v) for v in row
+                                        )
+                                        + '\n'
+                                    ).encode('utf-8')
+                                )
+                            rows_count += 1
+
+                            # Log progress every million rows
+                            if rows_count % 1000000 == 0:
+                                self.log.info(
+                                    f'COPY progress: {rows_count} rows extracted'
+                                )
+
+                # Upload the temp file to GCS
+                self.log.info(
+                    f'Uploading {rows_count} rows to GCS: gs://{self.bucket}/{self.filename}'
+                )
+                gcs_hook.upload(
+                    bucket_name=self.bucket,
+                    object_name=self.filename,
+                    filename=tmp_path,
+                    mime_type=mime_type,
+                )
+
+            finally:
+                # Clean up temp file
+                try:
+                    os.remove(tmp_path)
+                except Exception as e:
+                    self.log.warning(f'Failed to remove temp file: {e}')
+
+            return rows_count
+
+        finally:
+            cursor.close()
+            conn.close()
+
     def _fix_timestamp_precision(self, df):
         """Fix timestamp precision to avoid TIMESTAMP_NANOS errors in BigQuery.
 
@@ -314,6 +592,62 @@ class PostgresToGCSOperator(BaseOperator):
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
 
         self.log.info(f'Extracting data from Postgres using query: {self.sql}')
+
+        # Handle COPY TO mode for memory-efficient streaming
+        if self.use_copy:
+            self.log.info('Using COPY TO for memory-efficient streaming')
+
+            # Get column types for schema and type handling
+            column_types = self._get_column_types(pg_hook)
+            column_names = list(column_types.keys())
+
+            # Detect JSON columns
+            json_columns = self._detect_json_columns(pg_hook)
+
+            # Determine if we need JSONL format
+            use_jsonl = bool(json_columns) or self.export_format == 'jsonl'
+            export_format = 'jsonl' if use_jsonl else self.export_format
+
+            if json_columns and self.export_format != 'jsonl':
+                self.log.info(
+                    f'Detected JSON columns: {json_columns}. Using JSONL format.'
+                )
+
+            # Build the COPY query
+            copy_query = self._build_copy_query(column_types, json_columns)
+
+            # Generate schema file for downstream operators
+            if self.schema_filename or export_format == 'parquet':
+                schema_data = _build_schema_from_column_types(
+                    column_types, json_columns
+                )
+                schema_filename = self.schema_filename or (
+                    self.filename + '.schema.json'
+                )
+                self.log.info(f'Generating schema file: {schema_filename}')
+                schema_json = json.dumps(schema_data, indent=2)
+                gcs_hook.upload(
+                    bucket_name=self.bucket,
+                    object_name=schema_filename,
+                    data=schema_json.encode('utf-8'),
+                    mime_type='application/json',
+                )
+
+            # Stream data to GCS (direct streaming by default, temp file as fallback)
+            if self.use_temp_file:
+                rows_extracted = self._stream_copy_to_gcs_with_temp_file(
+                    pg_hook, gcs_hook, copy_query, use_jsonl, column_names
+                )
+            else:
+                rows_extracted = self._stream_copy_to_gcs(
+                    pg_hook, gcs_hook, copy_query, use_jsonl
+                )
+
+            self.log.info(f'Extracted {rows_extracted} rows from Postgres via COPY.')
+
+            return f'gs://{self.bucket}/{self.filename}'
+
+        # Original pandas-based extraction path
         self.log.info(
             f'Using pandas_chunksize={self.pandas_chunksize} for chunked extraction'
         )
