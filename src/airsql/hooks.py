@@ -486,10 +486,15 @@ WHEN NOT MATCHED THEN
     ) -> None:
         """Merge DataFrame into Postgres table using ON CONFLICT."""
         from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
+            USE_PSYCOPG3,
             PostgresHook,  # noqa: PLC0415
         )
-        from psycopg2 import sql as psycopg2_sql  # noqa: PLC0415
-        from psycopg2.extras import execute_values  # noqa: PLC0415
+
+        if USE_PSYCOPG3:
+            from psycopg import sql as psycopg_sql  # noqa: PLC0415
+        else:
+            from psycopg2 import sql as psycopg_sql  # noqa: PLC0415
+            from psycopg2.extras import execute_values  # noqa: PLC0415
 
         hook = PostgresHook(postgres_conn_id=table.conn_id)
         conn = hook.get_conn()
@@ -502,10 +507,10 @@ WHEN NOT MATCHED THEN
             df_filtered = df[common_columns]
             if '.' in table.table_name:
                 schema_name, table_name = table.table_name.split('.', 1)
-                table_identifier = psycopg2_sql.Identifier(schema_name, table_name)
+                table_identifier = psycopg_sql.Identifier(schema_name, table_name)
             else:
                 schema_name, table_name = 'public', table.table_name
-                table_identifier = psycopg2_sql.Identifier(table_name)
+                table_identifier = psycopg_sql.Identifier(table_name)
 
             # Determine which columns to update
             if update_columns is None:
@@ -538,45 +543,50 @@ WHEN NOT MATCHED THEN
                 update_cols = update_columns
             data_tuples = [tuple(x) for x in df_filtered[common_columns].to_numpy()]
 
-            insert_sql = psycopg2_sql.SQL(
+            insert_sql = psycopg_sql.SQL(
                 'INSERT INTO {table} ({columns}) VALUES %s'
             ).format(
                 table=table_identifier,
-                columns=psycopg2_sql.SQL(', ').join([
-                    psycopg2_sql.Identifier(col) for col in common_columns
+                columns=psycopg_sql.SQL(', ').join([
+                    psycopg_sql.Identifier(col) for col in common_columns
                 ]),
             )
 
-            conflict_sql_part = psycopg2_sql.SQL(
+            conflict_sql_part = psycopg_sql.SQL(
                 'ON CONFLICT ({conflict_cols}) DO '
             ).format(
-                conflict_cols=psycopg2_sql.SQL(', ').join([
-                    psycopg2_sql.Identifier(col) for col in conflict_columns
+                conflict_cols=psycopg_sql.SQL(', ').join([
+                    psycopg_sql.Identifier(col) for col in conflict_columns
                 ])
             )
 
             if not update_cols:
-                update_sql_part = psycopg2_sql.SQL('NOTHING')
+                update_sql_part = psycopg_sql.SQL('NOTHING')
             else:
                 set_statements = [
-                    psycopg2_sql.SQL(
+                    psycopg_sql.SQL(
                         '{col_to_update} = EXCLUDED.{col_to_update}'
-                    ).format(col_to_update=psycopg2_sql.Identifier(col))
+                    ).format(col_to_update=psycopg_sql.Identifier(col))
                     for col in update_cols
                 ]
-                update_sql_part = psycopg2_sql.SQL('UPDATE SET {}').format(
-                    psycopg2_sql.SQL(', ').join(set_statements)
+                update_sql_part = psycopg_sql.SQL('UPDATE SET {}').format(
+                    psycopg_sql.SQL(', ').join(set_statements)
                 )
 
-            final_sql_query = psycopg2_sql.SQL(' ').join([
+            final_sql_query = psycopg_sql.SQL(' ').join([
                 insert_sql,
                 conflict_sql_part,
                 update_sql_part,
             ])
 
-            execute_values(
-                cursor, final_sql_query.as_string(cursor), data_tuples
-            )  # Pass as string to execute_values
+            if USE_PSYCOPG3:
+                for i in range(0, len(data_tuples), 1000):
+                    batch = data_tuples[i : i + 1000]
+                    cursor.executemany(final_sql_query.as_string(cursor), batch)
+            else:
+                execute_values(
+                    cursor, final_sql_query.as_string(cursor), data_tuples
+                )  # Pass as string to execute_values
             conn.commit()
 
         except Exception as e:

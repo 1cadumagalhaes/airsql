@@ -3,9 +3,13 @@ from io import BytesIO, StringIO
 
 from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
-from airflow.providers.postgres.hooks.postgres import PostgresHook
-from psycopg2 import sql as psycopg2_sql
-from psycopg2.extras import execute_values
+from airflow.providers.postgres.hooks.postgres import USE_PSYCOPG3, PostgresHook
+
+if USE_PSYCOPG3:
+    from psycopg import sql as psycopg_sql  # noqa: PLC0415
+else:
+    from psycopg2 import sql as psycopg_sql  # noqa: PLC0415
+    from psycopg2.extras import execute_values  # noqa: PLC0415
 
 from airsql.utils import DataValidator, OperationSummary
 
@@ -70,12 +74,12 @@ class GCSToPostgresOperator(BaseOperator):
 
         try:
             table_identifier = (
-                psycopg2_sql.Identifier(schema, table_name_simple)
+                psycopg_sql.Identifier(schema, table_name_simple)
                 if schema
-                else psycopg2_sql.Identifier(table_name_simple)
+                else psycopg_sql.Identifier(table_name_simple)
             )
 
-            grant_sql = psycopg2_sql.SQL(
+            grant_sql = psycopg_sql.SQL(
                 'GRANT ALL PRIVILEGES ON {table} TO PUBLIC'
             ).format(table=table_identifier)
 
@@ -240,36 +244,42 @@ class GCSToPostgresOperator(BaseOperator):
 
         try:
             table_identifier = (
-                psycopg2_sql.Identifier(schema, table_name_simple)
+                psycopg_sql.Identifier(schema, table_name_simple)
                 if schema
-                else psycopg2_sql.Identifier(table_name_simple)
+                else psycopg_sql.Identifier(table_name_simple)
             )
 
-            truncate_sql = psycopg2_sql.SQL('TRUNCATE TABLE {table}').format(
+            truncate_sql = psycopg_sql.SQL('TRUNCATE TABLE {table}').format(
                 table=table_identifier
             )
             self.log.info(f'Truncating table {schema}.{table_name_simple}')
-            cursor.execute(truncate_sql)
+            cursor.execute(truncate_sql.as_string(cursor))
 
             insert_cols_ident = [
-                psycopg2_sql.Identifier(col) for col in df_filtered.columns
+                psycopg_sql.Identifier(col) for col in df_filtered.columns
             ]
 
-            insert_sql = psycopg2_sql.SQL(
+            insert_sql = psycopg_sql.SQL(
                 'INSERT INTO {table} ({columns}) VALUES %s'
             ).format(
                 table=table_identifier,
-                columns=psycopg2_sql.SQL(', ').join(insert_cols_ident),
+                columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
             )
 
             data_tuples = self._dataframe_to_tuples(df_filtered)
 
-            execute_values(
-                cursor,
-                insert_sql.as_string(cursor),
-                data_tuples,
-                page_size=1000,
-            )
+            if USE_PSYCOPG3:
+                # Use executemany for psycopg3
+                for i in range(0, len(data_tuples), 1000):
+                    batch = data_tuples[i : i + 1000]
+                    cursor.executemany(insert_sql.as_string(cursor), batch)
+            else:
+                execute_values(
+                    cursor,
+                    insert_sql.as_string(cursor),
+                    data_tuples,
+                    page_size=1000,
+                )
 
             conn.commit()
             self.log.info('Truncate and insert to Postgres complete.')
@@ -291,17 +301,17 @@ class GCSToPostgresOperator(BaseOperator):
 
         try:
             table_identifier = (
-                psycopg2_sql.Identifier(schema, table_name_simple)
+                psycopg_sql.Identifier(schema, table_name_simple)
                 if schema
-                else psycopg2_sql.Identifier(table_name_simple)
+                else psycopg_sql.Identifier(table_name_simple)
             )
 
             insert_cols_ident = [
-                psycopg2_sql.Identifier(col) for col in df_filtered.columns
+                psycopg_sql.Identifier(col) for col in df_filtered.columns
             ]
 
             conflict_cols_ident = [
-                psycopg2_sql.Identifier(col) for col in self.conflict_columns
+                psycopg_sql.Identifier(col) for col in self.conflict_columns
             ]
 
             audit_cols_to_exclude = {
@@ -318,30 +328,30 @@ class GCSToPostgresOperator(BaseOperator):
             ]
 
             if not update_set_cols:
-                update_sql_part = psycopg2_sql.SQL('NOTHING')
+                update_sql_part = psycopg_sql.SQL('NOTHING')
             else:
                 set_statements = [
-                    psycopg2_sql.SQL(
+                    psycopg_sql.SQL(
                         '{col_to_update} = EXCLUDED.{col_to_update}'
-                    ).format(col_to_update=psycopg2_sql.Identifier(col))
+                    ).format(col_to_update=psycopg_sql.Identifier(col))
                     for col in update_set_cols
                 ]
-                update_sql_part = psycopg2_sql.SQL('UPDATE SET {}').format(
-                    psycopg2_sql.SQL(', ').join(set_statements)
+                update_sql_part = psycopg_sql.SQL('UPDATE SET {}').format(
+                    psycopg_sql.SQL(', ').join(set_statements)
                 )
 
-            insert_sql = psycopg2_sql.SQL(
+            insert_sql = psycopg_sql.SQL(
                 'INSERT INTO {table} ({columns}) VALUES %s'
             ).format(
                 table=table_identifier,
-                columns=psycopg2_sql.SQL(', ').join(insert_cols_ident),
+                columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
             )
 
-            conflict_sql_part = psycopg2_sql.SQL(
+            conflict_sql_part = psycopg_sql.SQL(
                 'ON CONFLICT ({conflict_cols}) DO '
-            ).format(conflict_cols=psycopg2_sql.SQL(', ').join(conflict_cols_ident))
+            ).format(conflict_cols=psycopg_sql.SQL(', ').join(conflict_cols_ident))
 
-            final_sql_query = psycopg2_sql.SQL(' ').join([
+            final_sql_query = psycopg_sql.SQL(' ').join([
                 insert_sql,
                 conflict_sql_part,
                 update_sql_part,
@@ -349,12 +359,17 @@ class GCSToPostgresOperator(BaseOperator):
 
             data_tuples = self._dataframe_to_tuples(df_filtered)
 
-            execute_values(
-                cursor,
-                final_sql_query.as_string(cursor),
-                data_tuples,
-                page_size=1000,
-            )
+            if USE_PSYCOPG3:
+                for i in range(0, len(data_tuples), 1000):
+                    batch = data_tuples[i : i + 1000]
+                    cursor.executemany(final_sql_query.as_string(cursor), batch)
+            else:
+                execute_values(
+                    cursor,
+                    final_sql_query.as_string(cursor),
+                    data_tuples,
+                    page_size=1000,
+                )
             conn.commit()
             self.log.info('Upsert to Postgres complete.')
         except Exception as e:
