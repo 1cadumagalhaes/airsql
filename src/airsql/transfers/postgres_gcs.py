@@ -18,6 +18,12 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from airsql.utils import DataValidator, OperationSummary, ValidationResult
 
+
+def _format_number(n: int) -> str:
+    """Format number with thousands separator."""
+    return f'{n:_}'
+
+
 # PostgreSQL to BigQuery type mapping
 POSTGRES_TO_BQ_TYPE_MAP = {
     'bool': 'BOOL',
@@ -445,6 +451,16 @@ class PostgresToGCSOperator(BaseOperator):
 
             # Stream directly to GCS using psycopg3 cursor.copy()
             rows_count = 0
+
+            # Get estimated row count
+            count_sql = f'SELECT COUNT(*) FROM ({copy_query}) AS subquery'  # noqa: S608
+            pg_hook.run(count_sql)
+            result = pg_hook.get_records(count_sql)
+            estimated_rows = result[0][0] if result else 0
+            self.log.info(
+                f'Estimated rows to extract: {_format_number(estimated_rows)}'
+            )
+
             with BlobWriter(blob) as writer:
                 with cursor.copy(copy_sql) as copy:
                     for raw_row in copy:
@@ -457,10 +473,12 @@ class PostgresToGCSOperator(BaseOperator):
                         rows_count += 1
 
                         if rows_count % 1000000 == 0:
-                            self.log.info(f'COPY progress: {rows_count} rows extracted')
+                            self.log.info(
+                                f'COPY progress: {_format_number(rows_count)} rows extracted'
+                            )
 
             self.log.info(
-                f'Uploaded {rows_count} rows to GCS: gs://{self.bucket}/{self.filename}'
+                f'Uploaded {_format_number(rows_count)} rows to GCS: gs://{self.bucket}/{self.filename}'
             )
 
             return rows_count
@@ -539,12 +557,12 @@ class PostgresToGCSOperator(BaseOperator):
                             # Log progress every million rows
                             if rows_count % 1000000 == 0:
                                 self.log.info(
-                                    f'COPY progress: {rows_count} rows extracted'
+                                    f'COPY progress: {_format_number(rows_count)} rows extracted'
                                 )
 
                 # Upload the temp file to GCS
                 self.log.info(
-                    f'Uploading {rows_count} rows to GCS: gs://{self.bucket}/{self.filename}'
+                    f'Uploading {_format_number(rows_count)} rows to GCS: gs://{self.bucket}/{self.filename}'
                 )
                 gcs_hook.upload(
                     bucket_name=self.bucket,
@@ -612,6 +630,12 @@ class PostgresToGCSOperator(BaseOperator):
             use_jsonl = bool(json_columns) or self.export_format == 'jsonl'
             export_format = 'jsonl' if use_jsonl else self.export_format
 
+            # Update filename extension if auto-switching to JSONL
+            if use_jsonl and self.export_format != 'jsonl' and '.' in self.filename:
+                base_name = self.filename.rsplit('.', 1)[0]
+                self.filename = f'{base_name}.jsonl'
+                self.log.info(f'Updated filename to: {self.filename}')
+
             if json_columns and self.export_format != 'jsonl':
                 self.log.info(
                     f'Detected JSON columns: {json_columns}. Using JSONL format.'
@@ -653,7 +677,9 @@ class PostgresToGCSOperator(BaseOperator):
                     pg_hook, gcs_hook, copy_query, use_jsonl
                 )
 
-            self.log.info(f'Extracted {rows_extracted} rows from Postgres via COPY.')
+            self.log.info(
+                f'Extracted {_format_number(rows_extracted)} rows from Postgres via COPY.'
+            )
 
             return f'gs://{self.bucket}/{self.filename}'
 
@@ -706,7 +732,7 @@ class PostgresToGCSOperator(BaseOperator):
                     fixed_chunk = self._fix_timestamp_precision(chunk)
                     rows_extracted += len(fixed_chunk)
                     self.log.info(
-                        f'Processed chunk: {len(fixed_chunk)} rows (total: {rows_extracted})'
+                        f'Processed chunk: {_format_number(len(fixed_chunk))} rows (total: {_format_number(rows_extracted)})'
                     )
                     if schema_source_df is None:
                         schema_source_df = fixed_chunk
@@ -767,7 +793,9 @@ class PostgresToGCSOperator(BaseOperator):
                 )
                 return f'gs://{self.bucket}/{self.filename}'
 
-            self.log.info(f'Extracted {rows_extracted} rows from Postgres.')
+            self.log.info(
+                f'Extracted {_format_number(rows_extracted)} rows from Postgres.'
+            )
             file_size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
             validation_result = ValidationResult(is_valid=True)
         else:
@@ -778,7 +806,7 @@ class PostgresToGCSOperator(BaseOperator):
                 )
                 return f'gs://{self.bucket}/{self.filename}'
 
-            self.log.info(f'Extracted {len(df)} rows from Postgres.')
+            self.log.info(f'Extracted {_format_number(len(df))} rows from Postgres.')
 
             df = self._fix_timestamp_precision(df)
             schema_source_df = df
