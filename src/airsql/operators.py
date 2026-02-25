@@ -78,13 +78,13 @@ class SQLQueryOperator(BaseSQLOperator):
         sql: str,
         output_table: Table,
         source_conn: Optional[str] = None,
-        dry_run: bool = False,
+        dry_run_flag: bool = False,
         pre_truncate: bool = False,
         **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
-        self.dry_run = dry_run
+        self.is_dry_run = dry_run_flag
         self.pre_truncate = pre_truncate
 
     def execute(self, context: Context) -> str:
@@ -100,13 +100,13 @@ class SQLQueryOperator(BaseSQLOperator):
             summary = OperationSummary(
                 operation_type='query',
                 rows_extracted=len(df),
-                rows_loaded=len(df) if not self.dry_run else 0,
+                rows_loaded=len(df) if not self.is_dry_run else 0,
                 duration_seconds=duration,
                 format_used='parquet',
-                dry_run=self.dry_run,
+                dry_run=self.is_dry_run,
             )
 
-            if not self.dry_run:
+            if not self.is_dry_run:
                 self.log.info(f'Query returned {len(df)} rows')
                 if_exists = 'truncate' if self.pre_truncate else 'append'
                 self.hook_manager.write_dataframe_to_table(
@@ -139,12 +139,12 @@ class SQLAppendOperator(BaseSQLOperator):
         sql: str,
         output_table: Table,
         source_conn: Optional[str] = None,
-        dry_run: bool = False,
+        dry_run_flag: bool = False,
         **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
-        self.dry_run = dry_run
+        self.is_dry_run = dry_run_flag
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and append to the output table."""
@@ -160,13 +160,13 @@ class SQLAppendOperator(BaseSQLOperator):
             summary = OperationSummary(
                 operation_type='append',
                 rows_extracted=len(df),
-                rows_loaded=len(df) if not self.dry_run else 0,
+                rows_loaded=len(df) if not self.is_dry_run else 0,
                 duration_seconds=duration,
                 format_used='parquet',
-                dry_run=self.dry_run,
+                dry_run=self.is_dry_run,
             )
 
-            if not self.dry_run:
+            if not self.is_dry_run:
                 self.hook_manager.write_dataframe_to_table(
                     df, self.output_table, if_exists='append'
                 )
@@ -181,7 +181,7 @@ class SQLAppendOperator(BaseSQLOperator):
             # Drop temporary table after append if marked as temporary
             if self.output_table.temporary:
                 self.log.info(f'Dropping temporary table: {self.output_table}')
-                self.hook_manager.drop_table(self.output_table)
+                SQLHookManager.drop_table(self.output_table)
         else:
             raise ValueError(
                 f'source_conn is required for {self.__class__.__name__}. '
@@ -235,12 +235,12 @@ class SQLReplaceOperator(BaseSQLOperator):
         sql: str,
         output_table: Table,
         source_conn: Optional[str] = None,
-        dry_run: bool = False,
+        dry_run_flag: bool = False,
         **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
-        self.dry_run = dry_run
+        self.is_dry_run = dry_run_flag
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and replace the output table."""
@@ -256,13 +256,13 @@ class SQLReplaceOperator(BaseSQLOperator):
             summary = OperationSummary(
                 operation_type='replace',
                 rows_extracted=len(df),
-                rows_loaded=len(df) if not self.dry_run else 0,
+                rows_loaded=len(df) if not self.is_dry_run else 0,
                 duration_seconds=duration,
                 format_used='parquet',
-                dry_run=self.dry_run,
+                dry_run=self.is_dry_run,
             )
 
-            if not self.dry_run:
+            if not self.is_dry_run:
                 self.hook_manager.replace_table_content(df, self.output_table)
                 self.log.info(f'Successfully replaced table with {len(df)} rows')
             else:
@@ -291,12 +291,12 @@ class SQLTruncateOperator(BaseSQLOperator):
         sql: str,
         output_table: Table,
         source_conn: Optional[str] = None,
-        dry_run: bool = False,
+        dry_run_flag: bool = False,
         **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
-        self.dry_run = dry_run
+        self.is_dry_run = dry_run_flag
 
     def execute(self, context: Context) -> str:
         """Execute the SQL query and truncate/reload the output table."""
@@ -312,13 +312,13 @@ class SQLTruncateOperator(BaseSQLOperator):
             summary = OperationSummary(
                 operation_type='truncate',
                 rows_extracted=len(df),
-                rows_loaded=len(df) if not self.dry_run else 0,
+                rows_loaded=len(df) if not self.is_dry_run else 0,
                 duration_seconds=duration,
                 format_used='parquet',
-                dry_run=self.dry_run,
+                dry_run=self.is_dry_run,
             )
 
-            if not self.dry_run:
+            if not self.is_dry_run:
                 self.hook_manager.truncate_table_content(df, self.output_table)
                 self.log.info(
                     f'Successfully truncated and reloaded table with {len(df)} rows'
@@ -333,7 +333,7 @@ class SQLTruncateOperator(BaseSQLOperator):
             # Drop temporary table after truncate/reload if marked as temporary
             if self.output_table.temporary:
                 self.log.info(f'Dropping temporary table: {self.output_table}')
-                self.hook_manager.drop_table(self.output_table)
+                SQLHookManager.drop_table(self.output_table)
         else:
             raise ValueError(
                 f'source_conn is required for {self.__class__.__name__}. '
@@ -357,7 +357,7 @@ class SQLMergeOperator(BaseSQLOperator):
         update_columns: Optional[List[str]] = None,
         source_conn: Optional[str] = None,
         pre_truncate: bool = False,
-        dry_run: bool = False,
+        dry_run_flag: bool = False,
         **kwargs,
     ):
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
@@ -365,7 +365,7 @@ class SQLMergeOperator(BaseSQLOperator):
         self.conflict_columns = conflict_columns
         self.update_columns = update_columns
         self.pre_truncate = pre_truncate
-        self.dry_run = dry_run
+        self.is_dry_run = dry_run_flag
 
     def execute(self, context: Context) -> Any:
         """Execute the SQL query and merge into the output table."""
@@ -384,13 +384,13 @@ class SQLMergeOperator(BaseSQLOperator):
             summary = OperationSummary(
                 operation_type='merge',
                 rows_extracted=len(df),
-                rows_loaded=len(df) if not self.dry_run else 0,
+                rows_loaded=len(df) if not self.is_dry_run else 0,
                 duration_seconds=duration,
                 format_used='parquet',
-                dry_run=self.dry_run,
+                dry_run=self.is_dry_run,
             )
 
-            if not self.dry_run:
+            if not self.is_dry_run:
                 if self.pre_truncate:
                     self.log.info(
                         f'Pre-truncating table {self.output_table} before merge'
@@ -419,7 +419,7 @@ class SQLMergeOperator(BaseSQLOperator):
             # Drop temporary table after merge if marked as temporary
             if self.output_table.temporary:
                 self.log.info(f'Dropping temporary table: {self.output_table}')
-                self.hook_manager.drop_table(self.output_table)
+                SQLHookManager.drop_table(self.output_table)
         else:
             raise ValueError(
                 f'source_conn is required for {self.__class__.__name__}. '
@@ -441,7 +441,7 @@ class DataFrameLoadOperator(BaseOperator):
         output_table: Table,
         timestamp_column: Optional[str] = None,
         if_exists: str = 'append',
-        dry_run: bool = False,
+        dry_run_flag: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -449,7 +449,7 @@ class DataFrameLoadOperator(BaseOperator):
         self.output_table = output_table
         self.timestamp_column = timestamp_column
         self.if_exists = if_exists
-        self.dry_run = dry_run
+        self.is_dry_run = dry_run_flag
         self.hook_manager = SQLHookManager()
 
         # Store extra kwargs as instance attributes for task mapping
@@ -470,13 +470,13 @@ class DataFrameLoadOperator(BaseOperator):
         summary = OperationSummary(
             operation_type='load',
             rows_extracted=len(self.dataframe),
-            rows_loaded=len(self.dataframe) if not self.dry_run else 0,
+            rows_loaded=len(self.dataframe) if not self.is_dry_run else 0,
             duration_seconds=duration,
             format_used='parquet',
-            dry_run=self.dry_run,
+            dry_run=self.is_dry_run,
         )
 
-        if not self.dry_run:
+        if not self.is_dry_run:
             self.hook_manager.write_dataframe_to_table(
                 df=self.dataframe,
                 table=self.output_table,
@@ -494,7 +494,7 @@ class DataFrameLoadOperator(BaseOperator):
         # Drop temporary table after load if marked as temporary
         if self.output_table.temporary:
             self.log.info(f'Dropping temporary table: {self.output_table}')
-            self.hook_manager.drop_table(self.output_table)
+            SQLHookManager.drop_table(self.output_table)
 
 
 class DataFrameMergeOperator(BaseOperator):
@@ -511,7 +511,7 @@ class DataFrameMergeOperator(BaseOperator):
         update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
         pre_truncate: bool = False,
-        dry_run: bool = False,
+        dry_run_flag: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -521,7 +521,7 @@ class DataFrameMergeOperator(BaseOperator):
         self.update_columns = update_columns
         self.timestamp_column = timestamp_column
         self.pre_truncate = pre_truncate
-        self.dry_run = dry_run
+        self.is_dry_run = dry_run_flag
         self.hook_manager = SQLHookManager()
 
         # Store extra kwargs as instance attributes for task mapping
@@ -544,13 +544,13 @@ class DataFrameMergeOperator(BaseOperator):
         summary = OperationSummary(
             operation_type='merge',
             rows_extracted=len(self.dataframe),
-            rows_loaded=len(self.dataframe) if not self.dry_run else 0,
+            rows_loaded=len(self.dataframe) if not self.is_dry_run else 0,
             duration_seconds=duration,
             format_used='parquet',
-            dry_run=self.dry_run,
+            dry_run=self.is_dry_run,
         )
 
-        if not self.dry_run:
+        if not self.is_dry_run:
             if self.pre_truncate:
                 self.log.info(f'Pre-truncating table {self.output_table} before merge')
                 # Create an empty DataFrame with the same structure for truncation
@@ -575,7 +575,7 @@ class DataFrameMergeOperator(BaseOperator):
         # Drop temporary table after merge if marked as temporary
         if self.output_table.temporary:
             self.log.info(f'Dropping temporary table: {self.output_table}')
-            self.hook_manager.drop_table(self.output_table)
+            SQLHookManager.drop_table(self.output_table)
 
 
 class SQLCheckOperator(BaseSQLCheckOperator):

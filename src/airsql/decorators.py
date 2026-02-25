@@ -18,6 +18,11 @@ if TYPE_CHECKING:
     pass
 
 
+def _get_func_name(func: Any) -> str:
+    """Get function name safely for typing."""
+    return getattr(func, '__name__', 'unknown')
+
+
 class SQLDecorators:
     """Collection of SQL operation decorators."""
 
@@ -123,7 +128,7 @@ class SQLDecorators:
                     return sql_template.render(**final_template_vars)
                 except Exception as e:
                     raise ValueError(
-                        f'Error rendering SQL template from function {func.__name__}:\n'
+                        f'Error rendering SQL template from function {_get_func_name(func)}:\n'
                         f'Error: {e}\n'
                         f"Template: '''{result}'''\n"
                         f'Variables: {final_template_vars}'
@@ -132,7 +137,7 @@ class SQLDecorators:
                 return result.render(context=final_template_vars)
             else:
                 raise ValueError(
-                    f'Decorated function {func.__name__} '
+                    f'Decorated function {_get_func_name(func)} '
                     'must return a SQL string or a airsql.File object '
                     "when 'sql_file' is not specified in the decorator."
                 )
@@ -144,8 +149,8 @@ class SQLDecorators:
         sql_file: Optional[str] = None,
         dry_run: bool = False,
         pre_truncate: bool = False,
-        **template_vars,
-    ) -> Callable:
+        **template_vars: Any,
+    ) -> Callable[[Any], Any]:
         """Decorator for SQL queries.
 
         Args:
@@ -159,24 +164,30 @@ class SQLDecorators:
                             dynamic task naming.
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLQueryOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
-                op_kwargs = {}
+                op_kwargs: dict[str, Any] = {}
                 if output_table:
                     op_kwargs['outlets'] = [output_table.as_asset()]
 
                 # Pass through extra template vars to operator for dynamic task naming
                 op_kwargs.update(template_vars)
 
+                # Validate output_table is provided
+                if output_table is None:
+                    raise ValueError(
+                        'output_table is required for @sql.query decorator'
+                    )
+
                 operator = SQLQueryOperator(
-                    task_id=func.__name__,
+                    task_id=_get_func_name(func),
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
@@ -195,8 +206,8 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         dry_run: bool = False,
-        **template_vars,
-    ) -> Callable:
+        **template_vars: Any,
+    ) -> Callable[[Any], Any]:
         """Decorator for SQL queries that append data to a destination table.
 
         Args:
@@ -209,21 +220,21 @@ class SQLDecorators:
                             dynamic task naming.
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLAppendOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
-                op_kwargs = {'outlets': [output_table.as_asset()]}
+                op_kwargs: dict[str, Any] = {'outlets': [output_table.as_asset()]}
                 # Pass through extra template vars for dynamic task naming
                 op_kwargs.update(template_vars)
 
                 operator = SQLAppendOperator(
-                    task_id=func.__name__,
+                    task_id=_get_func_name(func),
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
@@ -241,7 +252,7 @@ class SQLDecorators:
         self,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
-        **template_vars,
+        **template_vars: Any,
     ) -> Callable:
         """
         Decorator for SQL queries that return a pandas DataFrame.
@@ -255,10 +266,10 @@ class SQLDecorators:
             **template_vars: Variables to pass to Jinja template
         """
 
-        def decorator(func: Callable) -> Callable:
-            @task(task_id=func.__name__)
+        def decorator(func: Any) -> Any:
+            @task(task_id=_get_func_name(func))
             @wraps(func)
-            def wrapper(*args, **kwargs):
+            def wrapper(*args: Any, **kwargs: Any):
                 from airsql.operators import SQLDataFrameOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -266,7 +277,7 @@ class SQLDecorators:
                 )
 
                 operator = SQLDataFrameOperator(
-                    task_id=f'{func.__name__}_internal',
+                    task_id=f'{_get_func_name(func)}_internal',
                     sql=sql_query,
                     source_conn=source_conn,
                 )
@@ -285,7 +296,7 @@ class SQLDecorators:
         sql_file: Optional[str] = None,
         method: str = 'replace',
         dry_run: bool = False,
-        **template_vars,
+        **template_vars: Any,
     ) -> Callable:
         """Decorator for SQL operations that replace table content.
 
@@ -300,9 +311,9 @@ class SQLDecorators:
                             dynamic task naming.
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> None:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import (  # noqa: PLC0415
                     SQLReplaceOperator,
                     SQLTruncateOperator,
@@ -318,7 +329,7 @@ class SQLDecorators:
 
                 if method == 'truncate':
                     operator = SQLTruncateOperator(
-                        task_id=func.__name__,
+                        task_id=_get_func_name(func),
                         sql=sql_query,
                         output_table=output_table,
                         source_conn=source_conn,
@@ -327,7 +338,7 @@ class SQLDecorators:
                     )
                 else:
                     operator = SQLReplaceOperator(
-                        task_id=func.__name__,
+                        task_id=_get_func_name(func),
                         sql=sql_query,
                         output_table=output_table,
                         source_conn=source_conn,
@@ -347,7 +358,7 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         dry_run: bool = False,
-        **template_vars,
+        **template_vars: Any,
     ) -> Callable:
         """Decorator for SQL operations that truncate table content and reload.
 
@@ -364,9 +375,9 @@ class SQLDecorators:
                             dynamic task naming.
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> None:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLTruncateOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -378,7 +389,7 @@ class SQLDecorators:
                 op_kwargs.update(template_vars)
 
                 operator = SQLTruncateOperator(
-                    task_id=func.__name__,
+                    task_id=_get_func_name(func),
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
@@ -401,7 +412,7 @@ class SQLDecorators:
         sql_file: Optional[str] = None,
         pre_truncate: bool = False,
         dry_run: bool = False,
-        **template_vars,
+        **template_vars: Any,
     ) -> Callable:
         """Decorator for SQL operations that merge/upsert into tables.
 
@@ -419,9 +430,9 @@ class SQLDecorators:
                             dynamic task naming.
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> None:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLMergeOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -433,7 +444,7 @@ class SQLDecorators:
                 op_kwargs.update(template_vars)
 
                 operator = SQLMergeOperator(
-                    task_id=func.__name__,
+                    task_id=_get_func_name(func),
                     sql=sql_query,
                     output_table=output_table,
                     conflict_columns=conflict_columns,
@@ -500,9 +511,9 @@ class SQLDecorators:
                 pass  # Function body can be empty when dataframe is provided
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 import pandas as pd  # noqa: PLC0415
 
                 from airsql.operators import DataFrameLoadOperator  # noqa: PLC0415
@@ -515,7 +526,7 @@ class SQLDecorators:
 
                 if not isinstance(df, pd.DataFrame):
                     raise ValueError(
-                        f'Function {func.__name__} must return a pandas DataFrame '
+                        f'Function {_get_func_name(func)} must return a pandas DataFrame '
                         'or a DataFrame must be provided to the decorator'
                     )
 
@@ -524,7 +535,7 @@ class SQLDecorators:
                 op_kwargs.update(extra_kwargs)
 
                 operator = DataFrameLoadOperator(
-                    task_id=func.__name__,
+                    task_id=_get_func_name(func),
                     dataframe=df,
                     output_table=output_table,
                     timestamp_column=timestamp_column,
@@ -594,9 +605,9 @@ class SQLDecorators:
                 pass  # Function body can be empty when dataframe is provided
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 import pandas as pd  # noqa: PLC0415
 
                 from airsql.operators import DataFrameMergeOperator  # noqa: PLC0415
@@ -609,7 +620,7 @@ class SQLDecorators:
 
                 if not isinstance(df, pd.DataFrame):
                     raise ValueError(
-                        f'Function {func.__name__} must return a pandas DataFrame '
+                        f'Function {_get_func_name(func)} must return a pandas DataFrame '
                         'or a DataFrame must be provided to the decorator'
                     )
 
@@ -618,7 +629,7 @@ class SQLDecorators:
                 op_kwargs.update(extra_kwargs)
 
                 operator = DataFrameMergeOperator(
-                    task_id=func.__name__,
+                    task_id=_get_func_name(func),
                     dataframe=df,
                     output_table=output_table,
                     conflict_columns=conflict_columns,
@@ -639,7 +650,7 @@ class SQLDecorators:
         conn_id: Optional[str] = None,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
-        **template_vars,
+        **template_vars: Any,
     ) -> Callable:
         """Decorator for SQL data quality checks (for dbt tests).
 
@@ -664,9 +675,9 @@ class SQLDecorators:
         """
         connection_id = conn_id or source_conn
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLCheckOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -674,7 +685,7 @@ class SQLDecorators:
                 )
 
                 operator = SQLCheckOperator(
-                    task_id=func.__name__,
+                    task_id=_get_func_name(func),
                     sql=sql_query,
                     source_conn=connection_id,
                 )
@@ -690,7 +701,7 @@ class SQLDecorators:
         output_table: Optional[Table] = None,
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
-        **template_vars,
+        **template_vars: Any,
     ) -> Callable:
         """
         Decorator for DDL operations like CREATE VIEW, CREATE TABLE AS.
@@ -707,9 +718,9 @@ class SQLDecorators:
                 return "CREATE OR REPLACE VIEW my_view AS SELECT * FROM {{ source_table }}"
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLQueryOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -721,7 +732,7 @@ class SQLDecorators:
                     op_kwargs['outlets'] = [output_table.as_asset()]
 
                 operator = SQLQueryOperator(
-                    task_id=func.__name__,
+                    task_id=_get_func_name(func),
                     sql=sql_query,
                     output_table=None,
                     source_conn=source_conn,
@@ -743,7 +754,7 @@ class SQLDecorators:
         timestamp_column: Optional[str] = None,
         sql_file: Optional[str] = None,
         dry_run: bool = False,
-        **template_vars,
+        **template_vars: Any,
     ) -> Callable:
         """TaskFlow-compatible decorator that extracts data via SQL and merges.
 
@@ -781,10 +792,10 @@ class SQLDecorators:
                 '''
         """
 
-        def decorator(func: Callable) -> Callable:
-            @task(task_id=func.__name__)
+        def decorator(func: Any) -> Any:
+            @task(task_id=_get_func_name(func))
             @wraps(func)
-            def wrapper(*args, **kwargs) -> str:
+            def wrapper(*args: Any, **kwargs: Any) -> str:
                 from airsql.operators import (  # noqa: PLC0415
                     DataFrameMergeOperator,
                     SQLDataFrameOperator,
@@ -797,7 +808,7 @@ class SQLDecorators:
 
                 # Get DataFrame from SQL query
                 dataframe_operator = SQLDataFrameOperator(
-                    task_id=f'{func.__name__}_extract',
+                    task_id=f'{_get_func_name(func)}_extract',
                     sql=sql_query,
                     source_conn=source_conn,
                 )
@@ -807,7 +818,7 @@ class SQLDecorators:
 
                 # Merge the DataFrame into the target table
                 merge_operator = DataFrameMergeOperator(
-                    task_id=f'{func.__name__}_merge',
+                    task_id=f'{_get_func_name(func)}_merge',
                     dataframe=df,
                     output_table=output_table,
                     conflict_columns=conflict_columns,
@@ -832,7 +843,7 @@ class SQLDecorators:
         if_exists: str = 'append',
         sql_file: Optional[str] = None,
         dry_run: bool = False,
-        **template_vars,
+        **template_vars: Any,
     ) -> Callable:
         """TaskFlow-compatible decorator that extracts data via SQL and loads.
 
@@ -870,10 +881,10 @@ class SQLDecorators:
                 '''
         """
 
-        def decorator(func: Callable) -> Callable:
-            @task(task_id=func.__name__)
+        def decorator(func: Any) -> Any:
+            @task(task_id=_get_func_name(func))
             @wraps(func)
-            def wrapper(*args, **kwargs) -> str:
+            def wrapper(*args: Any, **kwargs: Any) -> str:
                 from airsql.operators import (  # noqa: PLC0415
                     DataFrameLoadOperator,
                     SQLDataFrameOperator,
@@ -886,7 +897,7 @@ class SQLDecorators:
 
                 # Get DataFrame from SQL query
                 dataframe_operator = SQLDataFrameOperator(
-                    task_id=f'{func.__name__}_extract',
+                    task_id=f'{_get_func_name(func)}_extract',
                     sql=sql_query,
                     source_conn=source_conn,
                 )
@@ -896,7 +907,7 @@ class SQLDecorators:
 
                 # Load the DataFrame into the target table
                 load_operator = DataFrameLoadOperator(
-                    task_id=f'{func.__name__}_load',
+                    task_id=f'{_get_func_name(func)}_load',
                     dataframe=df,
                     output_table=output_table,
                     timestamp_column=timestamp_column,
