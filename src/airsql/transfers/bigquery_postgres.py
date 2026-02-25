@@ -110,7 +110,6 @@ class BigQueryToPostgresOperator(BaseOperator):
             and self.auto_detect_json_columns
             and self.export_format == 'parquet'
         ):
-            bq_hook = None
             try:
                 from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
                     BigQueryHook,
@@ -128,9 +127,6 @@ class BigQueryToPostgresOperator(BaseOperator):
                     )
             except Exception as e:
                 self.log.warning(f'Failed to detect JSON columns: {e}')
-            finally:
-                if bq_hook:
-                    bq_hook.close_conn()
 
         if not self.dry_run:
             self.log.info(
