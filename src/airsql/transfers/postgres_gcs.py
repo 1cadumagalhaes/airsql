@@ -636,6 +636,9 @@ class PostgresToGCSOperator(BaseOperator):
                 self.filename = f'{base_name}.jsonl'
                 self.log.info(f'Updated filename to: {self.filename}')
 
+            # Store actual format for downstream operators
+            self.actual_export_format = export_format
+
             if json_columns and self.export_format != 'jsonl':
                 self.log.info(
                     f'Detected JSON columns: {json_columns}. Using JSONL format.'

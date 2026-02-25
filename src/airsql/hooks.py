@@ -328,7 +328,6 @@ class SQLHookManager:
             if_exists=if_exists,
             index=False,
             method='multi',
-            dtype_backend='pyarrow',
         )
 
     @staticmethod
@@ -393,7 +392,6 @@ class SQLHookManager:
             if_exists='replace',
             index=False,
             method='multi',
-            dtype_backend='pyarrow',
         )
 
     @staticmethod
@@ -631,5 +629,4 @@ WHEN NOT MATCHED THEN
                 if_exists='append',
                 index=False,
                 method='multi',
-                dtype_backend='pyarrow',
             )

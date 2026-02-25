@@ -176,7 +176,12 @@ class PostgresToBigQueryOperator(BaseOperator):
             use_temp_file=self.use_temp_file,
             dry_run=self.dry_run,
         )
-        pg_to_gcs.execute(context)
+        actual_gcs_path = pg_to_gcs.execute(context)
+
+        # Get actual export format from the operator (set during COPY if auto-switched)
+        actual_export_format = (
+            getattr(pg_to_gcs, 'actual_export_format', None) or actual_export_format
+        )
 
         if not self.dry_run:
             self.log.info(
@@ -195,7 +200,9 @@ class PostgresToBigQueryOperator(BaseOperator):
             gcs_to_bq_kwargs = {
                 'task_id': f'{self.task_id}_load',
                 'bucket': self.gcs_bucket,
-                'source_objects': [actual_gcs_temp_path],
+                'source_objects': [
+                    actual_gcs_path.replace(f'gs://{self.gcs_bucket}/', '')
+                ],
                 'destination_project_dataset_table': self.destination_table,
                 'gcp_conn_id': self.gcp_conn_id,
                 'write_disposition': self.write_disposition,
