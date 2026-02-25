@@ -413,7 +413,17 @@ class PostgresToGCSOperator(BaseOperator):
         Returns:
             Number of rows extracted
         """
-        from google.cloud.storage import BlobWriter  # noqa: PLC0415
+        try:
+            from google.cloud.storage.fileio import BlobWriter  # noqa: PLC0415
+        except ImportError:
+            self.log.warning(
+                'BlobWriter not available in this google-cloud-storage version. '
+                'Falling back to temp file approach.'
+            )
+            return self._stream_copy_to_gcs_with_temp_file(
+                pg_hook, gcs_hook, copy_query, use_jsonl, []
+            )
+
         from google.cloud.storage import Client as GCSClient  # noqa: PLC0415
 
         conn = pg_hook.get_conn()
