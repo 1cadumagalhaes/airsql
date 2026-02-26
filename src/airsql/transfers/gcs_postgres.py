@@ -4,15 +4,32 @@ from io import BytesIO, StringIO
 
 from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
-from airflow.providers.postgres.hooks.postgres import USE_PSYCOPG3, PostgresHook
-
-if USE_PSYCOPG3:
-    from psycopg import sql as psycopg_sql  # noqa: PLC0415
-else:
-    from psycopg2 import sql as psycopg_sql  # noqa: PLC0415
-    from psycopg2.extras import execute_values  # noqa: PLC0415
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from airsql.utils import DataValidator, OperationSummary
+
+
+def _get_sql_module(conn):
+    if conn is None:
+        from psycopg import sql
+
+        return sql
+    conn_module = getattr(conn.__class__, '__module__', '')
+    if conn_module.startswith('psycopg2'):
+        from psycopg2 import sql
+
+        return sql
+    else:
+        from psycopg import sql
+
+        return sql
+
+
+def _is_psycopg2_connection(conn):
+    if conn is None:
+        return False
+    conn_module = getattr(conn.__class__, '__module__', '')
+    return conn_module.startswith('psycopg2')
 
 
 class GCSToPostgresOperator(BaseOperator):
@@ -29,6 +46,7 @@ class GCSToPostgresOperator(BaseOperator):
         replace=False,
         grant_table_privileges: bool = True,
         create_if_empty: bool = False,
+        create_if_missing: bool = False,
         audit_cols_to_exclude=None,
         dry_run: bool = False,
         *args,
@@ -44,6 +62,7 @@ class GCSToPostgresOperator(BaseOperator):
         self.replace = replace
         self.grant_table_privileges = grant_table_privileges
         self.create_if_empty = create_if_empty
+        self.create_if_missing = create_if_missing
         self.dry_run = dry_run
         self.audit_cols_to_exclude = audit_cols_to_exclude or {
             'criado_em',
@@ -57,36 +76,72 @@ class GCSToPostgresOperator(BaseOperator):
         """Convert DataFrame to tuples with proper type conversion for PostgreSQL.
 
         Handles both PyArrow-backed and standard pandas DataFrames efficiently.
+        Converts dict/list values to JSON strings for PostgreSQL JSON columns.
         """
         import numpy as np  # noqa: PLC0415
         import pandas as pd  # noqa: PLC0415
 
-        # For PyArrow-backed DataFrames, convert to numpy with None for nulls
-        # For standard pandas DataFrames, convert_dtypes handles NA values
-        if hasattr(df, '__arrow_c_stream__'):  # PyArrow-backed DataFrame
-            # Use to_numpy to preserve null handling
+        if hasattr(df, '__arrow_c_stream__'):
             df_clean = df.where(pd.notna(df), None)
         else:
-            # Standard pandas DataFrame
             df_clean = df.convert_dtypes().replace({pd.NA: None, np.nan: None})
 
-        return [tuple(row) for row in df_clean.values.tolist()]
+        def convert_value(val):
+            if val is None:
+                return None
+            if isinstance(val, (dict, list)):
+                return json.dumps(val)
+            return val
+
+        return [
+            tuple(convert_value(v) for v in row) for row in df_clean.values.tolist()
+        ]
+
+    @staticmethod
+    def _convert_json_columns_to_strings(df, json_columns=None):
+        """Convert dict/list columns to JSON strings for PostgreSQL.
+
+        Args:
+            df: DataFrame to convert
+            json_columns: Optional set of column names to convert. If None, auto-detects.
+
+        Returns:
+            DataFrame with dict/list columns converted to JSON strings
+        """
+
+        df_copy = df.copy()
+
+        if json_columns is None:
+            json_columns = [
+                col
+                for col in df_copy.columns
+                if df_copy[col].apply(lambda x: isinstance(x, (dict, list))).any()
+            ]
+
+        for col in json_columns:
+            if col in df_copy.columns:
+                df_copy[col] = df_copy[col].apply(
+                    lambda x: json.dumps(x) if isinstance(x, (dict, list)) else x
+                )
+
+        return df_copy
 
     def _grant_table_privileges(self, pg_hook, schema, table_name_simple):
         """Grant all privileges on table to public."""
         conn = pg_hook.get_conn()
         cursor = conn.cursor()
+        sql_mod = _get_sql_module(conn)
 
         try:
             table_identifier = (
-                psycopg_sql.Identifier(schema, table_name_simple)
+                sql_mod.Identifier(schema, table_name_simple)
                 if schema
-                else psycopg_sql.Identifier(table_name_simple)
+                else sql_mod.Identifier(table_name_simple)
             )
 
-            grant_sql = psycopg_sql.SQL(
-                'GRANT ALL PRIVILEGES ON {table} TO PUBLIC'
-            ).format(table=table_identifier)
+            grant_sql = sql_mod.SQL('GRANT ALL PRIVILEGES ON {table} TO PUBLIC').format(
+                table=table_identifier
+            )
 
             self.log.info(
                 f'Granting all privileges on {schema}.{table_name_simple} to PUBLIC'
@@ -133,7 +188,6 @@ class GCSToPostgresOperator(BaseOperator):
         )
         pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
 
-        # Auto-detect format from file extension
         file_format = self._detect_file_format(self.object_name)
         if file_format == 'parquet':
             df = pd.read_parquet(BytesIO(file_data), engine='pyarrow')
@@ -144,7 +198,7 @@ class GCSToPostgresOperator(BaseOperator):
 
             table = avro.read_table(BytesIO(file_data))
             df = table.to_pandas()
-        else:  # csv
+        else:
             df = pd.read_csv(
                 StringIO(file_data.decode('utf-8')), dtype_backend='pyarrow'
             )
@@ -157,12 +211,10 @@ class GCSToPostgresOperator(BaseOperator):
 
         table_name_full = f'{schema}.{table_name_simple}'
 
-        # Check if table exists
         table_exists = GCSToPostgresOperator._table_exists(
             pg_hook, schema, table_name_simple
         )
 
-        # Handle empty DataFrame with create_if_empty option
         if df.empty:
             if self.create_if_empty and not table_exists:
                 self.log.info(
@@ -177,7 +229,23 @@ class GCSToPostgresOperator(BaseOperator):
             self.log.info('Source file is empty. No data to load.')
             return table_name_full
 
-        # Get actual column names from the target Postgres table
+        if not table_exists:
+            if self.create_if_missing:
+                self.log.info(
+                    f'Table {table_name_full} does not exist and create_if_missing=True. '
+                    f'Creating table with inferred schema.'
+                )
+                if not self.dry_run:
+                    self._create_table_from_dataframe(
+                        pg_hook, schema, table_name_simple, df
+                    )
+                table_exists = True
+            else:
+                raise ValueError(
+                    f'Table {table_name_full} does not exist. '
+                    f'Either create the table first or set create_if_missing=True.'
+                )
+
         self.log.info(f'Fetching schema for Postgres table: {table_name_full}')
         sql_get_columns = """
         SELECT column_name FROM information_schema.columns
@@ -197,7 +265,6 @@ class GCSToPostgresOperator(BaseOperator):
         common_columns = [col for col in df.columns if col in model_columns]
         df_filtered = df[common_columns].replace({np.nan: None})
 
-        # Detect JSON/JSONB columns and fix JSON quoting from BigQuery exports
         json_columns = self._detect_json_columns(pg_hook, schema, table_name_simple)
         if json_columns and file_format == 'jsonl':
             self.log.info(f'Detected JSON columns, fixing quoting: {json_columns}')
@@ -205,7 +272,6 @@ class GCSToPostgresOperator(BaseOperator):
                 df_filtered, json_columns
             )
 
-        # Validate DataFrame
         validation_result = DataValidator.validate_columns(
             df_filtered, expected_columns=common_columns
         )
@@ -246,7 +312,8 @@ class GCSToPostgresOperator(BaseOperator):
                 self.log.info(
                     f'Appending DataFrame to Postgres table {table_name_full}'
                 )
-                df_filtered.to_sql(
+                df_to_insert = self._convert_json_columns_to_strings(df_filtered)
+                df_to_insert.to_sql(
                     name=table_name_simple,
                     con=engine,
                     schema=schema,
@@ -273,46 +340,42 @@ class GCSToPostgresOperator(BaseOperator):
         """Truncate table and insert new data to preserve table permissions."""
         conn = pg_hook.get_conn()
         cursor = conn.cursor()
+        sql_mod = _get_sql_module(conn)
+        is_psycopg2 = _is_psycopg2_connection(conn)
 
         try:
             table_identifier = (
-                psycopg_sql.Identifier(schema, table_name_simple)
+                sql_mod.Identifier(schema, table_name_simple)
                 if schema
-                else psycopg_sql.Identifier(table_name_simple)
+                else sql_mod.Identifier(table_name_simple)
             )
 
-            truncate_sql = psycopg_sql.SQL('TRUNCATE TABLE {table}').format(
+            truncate_sql = sql_mod.SQL('TRUNCATE TABLE {table}').format(
                 table=table_identifier
             )
             self.log.info(f'Truncating table {schema}.{table_name_simple}')
             cursor.execute(truncate_sql.as_string(cursor))
 
-            insert_cols_ident = [
-                psycopg_sql.Identifier(col) for col in df_filtered.columns
-            ]
+            insert_cols_ident = [sql_mod.Identifier(col) for col in df_filtered.columns]
 
             data_tuples = self._dataframe_to_tuples(df_filtered)
 
-            if USE_PSYCOPG3:
-                # Use COPY FROM for psycopg3 - much faster than executemany
-                copy_sql = psycopg_sql.SQL(
-                    'COPY {table} ({columns}) FROM STDIN'
-                ).format(
+            if not is_psycopg2:
+                copy_sql = sql_mod.SQL('COPY {table} ({columns}) FROM STDIN').format(
                     table=table_identifier,
-                    columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
+                    columns=sql_mod.SQL(', ').join(insert_cols_ident),
                 )
                 with cursor.copy(copy_sql.as_string(cursor)) as copy:
                     for row in data_tuples:
                         copy.write_row(row)
             else:
-                # For psycopg2, use execute_values
                 from psycopg2.extras import execute_values  # noqa: PLC0415
 
-                insert_sql_psycopg2 = psycopg_sql.SQL(
+                insert_sql_psycopg2 = sql_mod.SQL(
                     'INSERT INTO {table} ({columns}) VALUES %s'
                 ).format(
                     table=table_identifier,
-                    columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
+                    columns=sql_mod.SQL(', ').join(insert_cols_ident),
                 )
                 execute_values(
                     cursor,
@@ -338,20 +401,20 @@ class GCSToPostgresOperator(BaseOperator):
         self.log.info(f'Upserting DataFrame into Postgres table {table_full_name}')
         conn = pg_hook.get_conn()
         cursor = conn.cursor()
+        sql_mod = _get_sql_module(conn)
+        is_psycopg2 = _is_psycopg2_connection(conn)
 
         try:
             table_identifier = (
-                psycopg_sql.Identifier(schema, table_name_simple)
+                sql_mod.Identifier(schema, table_name_simple)
                 if schema
-                else psycopg_sql.Identifier(table_name_simple)
+                else sql_mod.Identifier(table_name_simple)
             )
 
-            insert_cols_ident = [
-                psycopg_sql.Identifier(col) for col in df_filtered.columns
-            ]
+            insert_cols_ident = [sql_mod.Identifier(col) for col in df_filtered.columns]
 
             conflict_cols_ident = [
-                psycopg_sql.Identifier(col) for col in self.conflict_columns
+                sql_mod.Identifier(col) for col in self.conflict_columns
             ]
 
             audit_cols_to_exclude = {
@@ -368,53 +431,54 @@ class GCSToPostgresOperator(BaseOperator):
             ]
 
             if not update_set_cols:
-                update_sql_part = psycopg_sql.SQL('NOTHING')
+                update_sql_part = sql_mod.SQL('NOTHING')
             else:
                 set_statements = [
-                    psycopg_sql.SQL(
-                        '{col_to_update} = EXCLUDED.{col_to_update}'
-                    ).format(col_to_update=psycopg_sql.Identifier(col))
+                    sql_mod.SQL('{col_to_update} = EXCLUDED.{col_to_update}').format(
+                        col_to_update=sql_mod.Identifier(col)
+                    )
                     for col in update_set_cols
                 ]
-                update_sql_part = psycopg_sql.SQL('UPDATE SET {}').format(
-                    psycopg_sql.SQL(', ').join(set_statements)
+                update_sql_part = sql_mod.SQL('UPDATE SET {}').format(
+                    sql_mod.SQL(', ').join(set_statements)
                 )
-
-            placeholders = ', '.join(['%s'] * len(df_filtered.columns))
-            insert_sql = psycopg_sql.SQL(
-                'INSERT INTO {table} ({columns}) VALUES ({placeholders})'
-            ).format(
-                table=table_identifier,
-                columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
-                placeholders=placeholders,
-            )
-
-            conflict_sql_part = psycopg_sql.SQL(
-                'ON CONFLICT ({conflict_cols}) DO '
-            ).format(conflict_cols=psycopg_sql.SQL(', ').join(conflict_cols_ident))
-
-            final_sql_query = psycopg_sql.SQL(' ').join([
-                insert_sql,
-                conflict_sql_part,
-                update_sql_part,
-            ])
 
             data_tuples = self._dataframe_to_tuples(df_filtered)
 
-            if USE_PSYCOPG3:
-                # COPY FROM doesn't support ON CONFLICT, use executemany for upserts
+            if not is_psycopg2:
+                col_names = ', '.join(df_filtered.columns)
+                placeholders = ', '.join(['%s'] * len(df_filtered.columns))
+
+                conflict_col_names = ', '.join(self.conflict_columns)
+
+                if not update_set_cols:
+                    update_clause = 'NOTHING'
+                else:
+                    set_clauses = [
+                        f'"{col}" = EXCLUDED."{col}"' for col in update_set_cols
+                    ]
+                    update_clause = f'UPDATE SET {", ".join(set_clauses)}'
+
+                final_sql = f'INSERT INTO {schema}.{table_name_simple} ({col_names}) VALUES ({placeholders}) ON CONFLICT ({conflict_col_names}) DO {update_clause}'
+
                 for i in range(0, len(data_tuples), 1000):
                     batch = data_tuples[i : i + 1000]
-                    cursor.executemany(final_sql_query.as_string(cursor), batch)
+                    cursor.executemany(final_sql, batch)
             else:
-                # For psycopg2, convert to VALUES format for execute_values
-                insert_sql_psycopg2 = psycopg_sql.SQL(
+                from psycopg2.extras import execute_values  # noqa: PLC0415
+
+                insert_sql_psycopg2 = sql_mod.SQL(
                     'INSERT INTO {table} ({columns}) VALUES %s'
                 ).format(
                     table=table_identifier,
-                    columns=psycopg_sql.SQL(', ').join(insert_cols_ident),
+                    columns=sql_mod.SQL(', ').join(insert_cols_ident),
                 )
-                final_sql_query_psycopg2 = psycopg_sql.SQL(' ').join([
+
+                conflict_sql_part = sql_mod.SQL(
+                    'ON CONFLICT ({conflict_cols}) DO '
+                ).format(conflict_cols=sql_mod.SQL(', ').join(conflict_cols_ident))
+
+                final_sql_query_psycopg2 = sql_mod.SQL(' ').join([
                     insert_sql_psycopg2,
                     conflict_sql_part,
                     update_sql_part,
@@ -481,7 +545,7 @@ class GCSToPostgresOperator(BaseOperator):
         """
         import ast  # noqa: PLC0415
 
-        import pandas as pd  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
 
         for col in json_columns:
             if col not in df.columns:
@@ -491,10 +555,12 @@ class GCSToPostgresOperator(BaseOperator):
                 if val is None:
                     return None
                 try:
-                    if pd.isna(val):
+                    if isinstance(val, float) and np.isnan(val):
                         return None
-                except TypeError:
+                except (TypeError, ValueError):
                     pass
+                if isinstance(val, (dict, list)):
+                    return json.dumps(val)
                 if isinstance(val, str):
                     try:
                         parsed = ast.literal_eval(val)
@@ -551,6 +617,57 @@ class GCSToPostgresOperator(BaseOperator):
             index=False,
         )
         self.log.info(f'Created empty table {schema}.{table_name}')
+
+        if self.grant_table_privileges:
+            self._grant_table_privileges(pg_hook, schema, table_name)
+
+    def _create_table_from_dataframe(
+        self, pg_hook, schema: str, table_name: str, df
+    ) -> None:
+        """Create a table based on DataFrame schema and types.
+
+        Creates the table with appropriate PostgreSQL types, including JSON/JSONB
+        for dict/list columns.
+
+        Args:
+            pg_hook: PostgresHook instance
+            schema: Schema name
+            table_name: Table name
+            df: DataFrame with data to infer schema from
+        """
+
+        conn = pg_hook.get_conn()
+        cursor = conn.cursor()
+        sql_mod = _get_sql_module(conn)
+
+        json_columns = [
+            col
+            for col in df.columns
+            if df[col].apply(lambda x: isinstance(x, (dict, list))).any()
+        ]
+
+        columns_sql = []
+        for col in df.columns:
+            col_ident = sql_mod.Identifier(col)
+            if col in json_columns:
+                columns_sql.append(sql_mod.SQL('{} JSONB').format(col_ident))
+            else:
+                columns_sql.append(sql_mod.SQL('{} TEXT').format(col_ident))
+
+        table_ident = (
+            sql_mod.Identifier(schema, table_name)
+            if schema
+            else sql_mod.Identifier(table_name)
+        )
+
+        create_sql = sql_mod.SQL('CREATE TABLE {} ({})').format(
+            table_ident, sql_mod.SQL(', ').join(columns_sql)
+        )
+
+        self.log.info(f'Creating table {schema}.{table_name} with inferred schema')
+        cursor.execute(create_sql.as_string(cursor))
+        conn.commit()
+        cursor.close()
 
         if self.grant_table_privileges:
             self._grant_table_privileges(pg_hook, schema, table_name)
