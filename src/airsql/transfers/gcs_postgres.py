@@ -174,12 +174,13 @@ class GCSToPostgresOperator(BaseOperator):
             )
 
             if is_integer_target or is_integer_source:
-                if df_copy[col].dtype == 'float64' or df_copy[col].dtype == 'float32':
-                    self.log.info(
-                        f'Coercing column {col} from {df_copy[col].dtype} to int '
-                        f'(pg_type={pg_type}, bq_type={self.source_schema.get(col) if self.source_schema else None})'
-                    )
-                    # Use nullable Int64 to handle NaN values while keeping integers
+                col_dtype = str(df_copy[col].dtype)
+                self.log.info(
+                    f'Column {col}: dtype={col_dtype}, pg_type={pg_type}, '
+                    f'bq_type={self.source_schema.get(col) if self.source_schema else None}'
+                )
+                if col_dtype == 'float64' or col_dtype == 'float32':
+                    self.log.info(f'Coercing column {col} from {col_dtype} to Int64')
                     df_copy[col] = df_copy[col].astype('Int64')
                 elif hasattr(df_copy[col].dtype, 'pyarrow_dtype'):
                     import pyarrow as pa  # noqa: PLC0415
