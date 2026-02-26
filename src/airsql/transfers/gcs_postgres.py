@@ -179,7 +179,7 @@ class GCSToPostgresOperator(BaseOperator):
                     f'Column {col}: dtype={col_dtype}, pg_type={pg_type}, '
                     f'bq_type={self.source_schema.get(col) if self.source_schema else None}'
                 )
-                if col_dtype == 'float64' or col_dtype == 'float32':
+                if col_dtype in {'float64', 'float32'}:
                     self.log.info(f'Coercing column {col} from {col_dtype} to Int64')
                     df_copy[col] = df_copy[col].astype('Int64')
                 elif hasattr(df_copy[col].dtype, 'pyarrow_dtype'):
