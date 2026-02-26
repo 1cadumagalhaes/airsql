@@ -512,7 +512,7 @@ class PostgresToGCSOperator(BaseOperator):
             else:
                 copy_sql = (
                     f'COPY ({copy_query}) TO STDOUT WITH '
-                    f"(FORMAT CSV, HEADER true, QUOTE '\"', ESCAPE '\"', FORCE_QUOTE *)"
+                    f"(FORMAT CSV, HEADER true, QUOTE '\"', ESCAPE '\"')"
                 )
 
             # Get GCS client for streaming upload
@@ -592,7 +592,7 @@ class PostgresToGCSOperator(BaseOperator):
             else:
                 copy_sql = (
                     f'COPY ({copy_query}) TO STDOUT WITH '
-                    f"(FORMAT CSV, HEADER false, QUOTE '\"', ESCAPE '\"', FORCE_QUOTE *)"
+                    f"(FORMAT CSV, HEADER false, QUOTE '\"', ESCAPE '\"')"
                 )
                 mime_type = 'text/csv'
                 suffix = '.csv'

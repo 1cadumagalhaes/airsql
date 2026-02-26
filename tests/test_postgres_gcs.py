@@ -167,7 +167,7 @@ class TestProblematicCharactersConstant:
 
 
 class TestCopyCommandWithQuoting:
-    def test_copy_csv_includes_force_quote(self):
+    def test_copy_csv_with_quoting_options(self):
         op = PostgresToGCSOperator(
             task_id='test',
             postgres_conn_id='pg',
