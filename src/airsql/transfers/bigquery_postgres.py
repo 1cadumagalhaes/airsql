@@ -41,6 +41,24 @@ class BigQueryToPostgresOperator(BaseOperator):
 
     JSON_COLUMN_TYPES = {'JSON', 'JSONB'}
 
+    BQ_TO_PG_TYPE_MAP = {
+        'INTEGER': 'integer',
+        'INT64': 'integer',
+        'FLOAT': 'double precision',
+        'FLOAT64': 'double precision',
+        'NUMERIC': 'numeric',
+        'BIGNUMERIC': 'numeric',
+        'BOOLEAN': 'boolean',
+        'BOOL': 'boolean',
+        'STRING': 'text',
+        'BYTES': 'bytea',
+        'DATE': 'date',
+        'DATETIME': 'timestamp',
+        'TIME': 'time',
+        'TIMESTAMP': 'timestamptz',
+        'JSON': 'jsonb',
+    }
+
     TABLE_NAME_WITH_PROJECT_PARTS = 3
     TABLE_NAME_WITHOUT_PROJECT_PARTS = 2
 
@@ -108,18 +126,21 @@ class BigQueryToPostgresOperator(BaseOperator):
 
         actual_export_format = self.export_format
         actual_gcs_temp_path = self.gcs_temp_path
+        bq_schema = {}
 
-        if (
-            not self.dry_run
-            and self.auto_detect_json_columns
-            and self.export_format == 'parquet'
-        ):
-            try:
-                from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
-                    BigQueryHook,
-                )
+        if not self.dry_run:
+            from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
+                BigQueryHook,
+            )
 
-                bq_hook = BigQueryHook(gcp_conn_id=self.gcp_conn_id)
+            bq_hook = BigQueryHook(gcp_conn_id=self.gcp_conn_id)
+
+            # Get BigQuery schema for type coercion
+            bq_schema = self._get_bq_schema(bq_hook)
+            if bq_schema:
+                self.log.info(f'Fetched BigQuery schema: {bq_schema}')
+
+            if self.auto_detect_json_columns and self.export_format == 'parquet':
                 json_columns = self._detect_json_columns(bq_hook)
                 if json_columns:
                     self.log.info(
@@ -129,8 +150,6 @@ class BigQueryToPostgresOperator(BaseOperator):
                     actual_gcs_temp_path = self.gcs_temp_path.replace(
                         '.parquet', '.jsonl'
                     )
-            except Exception as e:
-                self.log.warning(f'Failed to detect JSON columns: {e}')
 
         if not self.dry_run:
             self.log.info(
@@ -185,6 +204,7 @@ class BigQueryToPostgresOperator(BaseOperator):
             conflict_columns=self.conflict_columns,
             replace=self.replace,
             create_if_empty=self.create_if_empty,
+            source_schema=bq_schema,
             dry_run=self.dry_run,
         )
         gcs_to_pg.execute(context)
@@ -248,6 +268,33 @@ class BigQueryToPostgresOperator(BaseOperator):
             self.log.warning(f'Failed to detect JSON columns: {e}')
 
         return json_columns
+
+    def _get_bq_schema(self, bq_hook: Any) -> dict:
+        """Get BigQuery table schema as a dict mapping column names to types.
+
+        Returns:
+            Dict mapping column names to BigQuery field types (uppercase)
+        """
+        try:
+            parts = self.source_table.split('.')
+            if len(parts) == self.TABLE_NAME_WITH_PROJECT_PARTS:
+                project_id, dataset_id, table_id = parts
+            elif len(parts) == self.TABLE_NAME_WITHOUT_PROJECT_PARTS:
+                dataset_id, table_id = parts
+                project_id = bq_hook.project_id
+            else:
+                self.log.warning(f'Invalid table name format: {self.source_table}')
+                return {}
+
+            client = bq_hook.get_client()
+            table_ref = client.dataset(dataset_id, project=project_id).table(table_id)
+            table_obj = client.get_table(table_ref)
+
+            return {field.name: field.field_type.upper() for field in table_obj.schema}
+
+        except Exception as e:
+            self.log.warning(f'Failed to get BigQuery schema: {e}')
+            return {}
 
     def _cleanup_temp_files(self, gcs_temp_path: str) -> None:
         """Clean up temporary files from GCS."""

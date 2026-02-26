@@ -1,6 +1,7 @@
 import json
 import time
 from io import BytesIO, StringIO
+from typing import Optional
 
 from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
@@ -47,6 +48,7 @@ class GCSToPostgresOperator(BaseOperator):
         grant_table_privileges: bool = True,
         create_if_empty: bool = False,
         create_if_missing: bool = False,
+        source_schema: Optional[dict] = None,
         audit_cols_to_exclude=None,
         dry_run: bool = False,
         *args,
@@ -63,6 +65,7 @@ class GCSToPostgresOperator(BaseOperator):
         self.grant_table_privileges = grant_table_privileges
         self.create_if_empty = create_if_empty
         self.create_if_missing = create_if_missing
+        self.source_schema = source_schema
         self.dry_run = dry_run
         self.audit_cols_to_exclude = audit_cols_to_exclude or {
             'criado_em',
@@ -123,6 +126,66 @@ class GCSToPostgresOperator(BaseOperator):
                 df_copy[col] = df_copy[col].apply(
                     lambda x: json.dumps(x) if isinstance(x, (dict, list)) else x
                 )
+
+        return df_copy
+
+    def _coerce_column_types(self, df, column_types):
+        """Coerce DataFrame column types to match PostgreSQL table schema.
+
+        BigQuery exports integers as floats (e.g., 0.0), but PostgreSQL COPY
+        cannot parse "0.0" as an integer. This method converts float columns
+        to integers when the target column is an integer type.
+
+        Args:
+            df: DataFrame to coerce
+            column_types: Dict mapping column names to PostgreSQL data types
+
+        Returns:
+            DataFrame with coerced column types
+        """
+        import pandas as pd  # noqa: PLC0415
+
+        INTEGER_TYPES = {
+            'integer',
+            'bigint',
+            'smallint',
+            'int',
+            'int2',
+            'int4',
+            'int8',
+            'serial',
+            'bigserial',
+            'smallserial',
+        }
+
+        BQ_INTEGER_TYPES = {'INTEGER', 'INT64'}
+
+        df_copy = df.copy()
+
+        for col, pg_type in column_types.items():
+            if col not in df_copy.columns:
+                continue
+
+            pg_type_lower = pg_type.lower()
+
+            is_integer_target = pg_type_lower in INTEGER_TYPES
+            is_integer_source = (
+                self.source_schema
+                and self.source_schema.get(col, '').upper() in BQ_INTEGER_TYPES
+            )
+
+            if is_integer_target or is_integer_source:
+                if df_copy[col].dtype == 'float64' or df_copy[col].dtype == 'float32':
+                    df_copy[col] = df_copy[col].apply(
+                        lambda x: int(x) if pd.notna(x) and x is not None else x
+                    )
+                elif hasattr(df_copy[col].dtype, 'pyarrow_dtype'):
+                    import pyarrow as pa  # noqa: PLC0415
+
+                    if pa.types.is_floating(df_copy[col].dtype.pyarrow_dtype):
+                        df_copy[col] = df_copy[col].apply(
+                            lambda x: int(x) if pd.notna(x) and x is not None else x
+                        )
 
         return df_copy
 
@@ -248,7 +311,7 @@ class GCSToPostgresOperator(BaseOperator):
 
         self.log.info(f'Fetching schema for Postgres table: {table_name_full}')
         sql_get_columns = """
-        SELECT column_name FROM information_schema.columns
+        SELECT column_name, data_type FROM information_schema.columns
         WHERE table_schema = %s AND table_name = %s
         ORDER BY ordinal_position;"""
         columns_from_db_records = pg_hook.get_records(
@@ -262,8 +325,11 @@ class GCSToPostgresOperator(BaseOperator):
             )
 
         model_columns = [rec[0] for rec in columns_from_db_records]
+        column_types = {rec[0]: rec[1] for rec in columns_from_db_records}
         common_columns = [col for col in df.columns if col in model_columns]
         df_filtered = df[common_columns].replace({np.nan: None})
+
+        df_filtered = self._coerce_column_types(df_filtered, column_types)
 
         json_columns = self._detect_json_columns(pg_hook, schema, table_name_simple)
         if json_columns and file_format == 'jsonl':

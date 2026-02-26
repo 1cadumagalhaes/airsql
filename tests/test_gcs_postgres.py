@@ -202,3 +202,130 @@ class TestCreateIfEmptyParameter:
             create_if_empty=True,
         )
         assert op.create_if_empty is True
+
+
+class TestCoerceColumnTypes:
+    """Test _coerce_column_types for BigQuery float-to-integer conversion."""
+
+    def test_coerce_float_to_integer_from_pg_schema(self):
+        """Test converting float columns to integer based on PostgreSQL schema."""
+        df = pd.DataFrame({
+            'id': [1.0, 2.0, 3.0],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'count': [10.0, 20.0, 30.0],
+        })
+
+        column_types = {'id': 'integer', 'name': 'text', 'count': 'integer'}
+
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+        )
+
+        result = op._coerce_column_types(df, column_types)
+
+        assert result['id'].dtype == 'int64'
+        assert result['count'].dtype == 'int64'
+        assert result['id'].tolist() == [1, 2, 3]
+        assert result['count'].tolist() == [10, 20, 30]
+
+    def test_coerce_float_to_integer_from_bq_schema(self):
+        """Test converting float columns to integer based on BigQuery schema."""
+        df = pd.DataFrame({
+            'id': [1.0, 2.0, 3.0],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'count': [10.0, 20.0, 30.0],
+        })
+
+        column_types = {'id': 'bigint', 'name': 'text', 'count': 'bigint'}
+
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            source_schema={'id': 'INTEGER', 'count': 'INT64'},
+        )
+
+        result = op._coerce_column_types(df, column_types)
+
+        assert result['id'].dtype == 'int64'
+        assert result['count'].dtype == 'int64'
+
+    def test_coerce_preserves_float_for_float_columns(self):
+        """Test that float columns are not converted when target is float."""
+        df = pd.DataFrame({
+            'id': [1, 2, 3],
+            'value': [10.5, 20.5, 30.5],
+        })
+
+        column_types = {'id': 'integer', 'value': 'double precision'}
+
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+        )
+
+        result = op._coerce_column_types(df, column_types)
+
+        assert result['id'].dtype == 'int64'
+        assert result['value'].dtype == 'float64'
+        assert result['value'].tolist() == [10.5, 20.5, 30.5]
+
+    def test_coerce_handles_nan_values(self):
+        """Test that NaN values are handled during float-to-int conversion."""
+        import numpy as np
+
+        df = pd.DataFrame({
+            'id': [1.0, 2.0, None],
+            'count': [10.0, np.nan, 30.0],
+        })
+
+        column_types = {'id': 'integer', 'count': 'integer'}
+
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+        )
+
+        result = op._coerce_column_types(df, column_types)
+
+        assert result['id'].tolist()[0] == 1
+        assert result['id'].tolist()[1] == 2
+        assert pd.isna(result['id'].tolist()[2])
+
+    def test_coerce_with_pyarrow_backend(self):
+        """Test conversion with PyArrow-backed DataFrame."""
+        df = pd.DataFrame({
+            'id': [1.0, 2.0, 3.0],
+            'name': ['Alice', 'Bob', 'Charlie'],
+        }).convert_dtypes(dtype_backend='pyarrow')
+
+        column_types = {'id': 'integer', 'name': 'text'}
+
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+        )
+
+        result = op._coerce_column_types(df, column_types)
+
+        assert result['id'].tolist() == [1, 2, 3]
