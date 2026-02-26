@@ -326,6 +326,7 @@ class PostgresToGCSOperator(BaseOperator):
         self.sampling_threshold = sampling_threshold
         self.auto_switch_format = auto_switch_format
         self.dry_run = dry_run
+        self.actual_export_format = export_format.lower()
 
         if self.export_format not in {'csv', 'parquet', 'jsonl'}:
             raise ValueError(
@@ -592,46 +593,35 @@ class PostgresToGCSOperator(BaseOperator):
             else:
                 copy_sql = (
                     f'COPY ({copy_query}) TO STDOUT WITH '
-                    f"(FORMAT CSV, HEADER false, QUOTE '\"', ESCAPE '\"')"
+                    f"(FORMAT CSV, HEADER true, QUOTE '\"', ESCAPE '\"')"
                 )
                 mime_type = 'text/csv'
                 suffix = '.csv'
 
-            # Use temp file for streaming
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             tmp_path = tmp.name
 
             try:
                 rows_count = 0
                 with open(tmp_path, 'wb') as f:
-                    # Write CSV header if not JSONL
-                    if not use_jsonl and column_names:
-                        f.write((','.join(column_names) + '\n').encode('utf-8'))
-
                     with cursor.copy(copy_sql) as copy:
                         for row in copy:
-                            if use_jsonl:
-                                # row is already a string from row_to_json
-                                f.write((row + '\n').encode('utf-8'))
+                            if isinstance(row, memoryview):
+                                row_bytes = row.tobytes()
                             else:
-                                # For CSV, join values
-                                f.write(
-                                    (
-                                        ','.join(
-                                            '' if v is None else str(v) for v in row
-                                        )
-                                        + '\n'
-                                    ).encode('utf-8')
-                                )
-                            rows_count += 1
+                                row_bytes = bytes(row) if row else b''
+                            if row_bytes:
+                                f.write(row_bytes)
+                                if not use_jsonl:
+                                    rows_count += 1
+                                else:
+                                    rows_count += row_bytes.count(b'\n')
 
-                            # Log progress every million rows
                             if rows_count % 1000000 == 0:
                                 self.log.info(
                                     f'COPY progress: {_format_number(rows_count)} rows extracted'
                                 )
 
-                # Upload the temp file to GCS
                 self.log.info(
                     f'Uploading {_format_number(rows_count)} rows to GCS: gs://{self.bucket}/{self.filename}'
                 )
@@ -643,7 +633,6 @@ class PostgresToGCSOperator(BaseOperator):
                 )
 
             finally:
-                # Clean up temp file
                 try:
                     os.remove(tmp_path)
                 except Exception as e:
@@ -840,6 +829,20 @@ class PostgresToGCSOperator(BaseOperator):
                 self.schema_filename = f'{base_schema}.jsonl.schema.json'
             self.actual_export_format = 'jsonl'
 
+        if json_columns and export_format == 'csv' and self.auto_switch_format:
+            self.log.info(
+                f'Detected JSON columns: {json_columns}. Switching to JSONL format for proper JSON serialization.'
+            )
+            export_format = 'jsonl'
+            if '.' in self.filename:
+                base_name = self.filename.rsplit('.', 1)[0]
+                self.filename = f'{base_name}.jsonl'
+                self.log.info(f'Updated filename to: {self.filename}')
+            if self.schema_filename and '.' in self.schema_filename:
+                base_schema = self.schema_filename.rsplit('.schema.json', 1)[0]
+                self.schema_filename = f'{base_schema}.jsonl.schema.json'
+            self.actual_export_format = 'jsonl'
+
         tmp_path: Optional[str] = None
         data_bytes: bytes = b''
         mime_type = 'application/octet-stream'
@@ -964,8 +967,27 @@ class PostgresToGCSOperator(BaseOperator):
                 data_bytes = data_buffer.getvalue().encode('utf-8')
                 mime_type = 'text/csv'
             elif export_format == 'jsonl':
+                import ast
+
                 data_buffer = StringIO()
-                df.to_json(
+                df_json = df.copy()
+                if json_columns:
+                    for col in json_columns:
+                        if col in df_json.columns:
+
+                            def parse_json_value(x):
+                                if not isinstance(x, str) or not x:
+                                    return x
+                                try:
+                                    return json.loads(x)
+                                except json.JSONDecodeError:
+                                    try:
+                                        return ast.literal_eval(x)
+                                    except (ValueError, SyntaxError):
+                                        return x
+
+                            df_json[col] = df_json[col].apply(parse_json_value)
+                df_json.to_json(
                     data_buffer,
                     orient='records',
                     lines=True,
