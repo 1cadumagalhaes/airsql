@@ -220,9 +220,12 @@ class PostgresToBigQueryOperator(BaseOperator):
         )
         actual_gcs_path = pg_to_gcs.execute(context)
 
-        # Get actual export format from the operator (set during COPY if auto-switched)
+        # Get actual export format and schema filename from the operator (may have changed during export)
         actual_export_format = (
             getattr(pg_to_gcs, 'actual_export_format', None) or actual_export_format
+        )
+        actual_schema_filename = (
+            getattr(pg_to_gcs, 'schema_filename', None) or actual_schema_filename
         )
 
         if not self.dry_run:

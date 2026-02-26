@@ -602,3 +602,61 @@ class TestCopyCommandWithQuoting:
             call_args = mock_stream.call_args
             assert call_args is not None
             assert call_args[0][3] is False
+
+
+class TestPostgresToBigQuerySchemaUpdate:
+    """Test that PostgresToBigQueryOperator uses updated schema filename after format switch."""
+
+    def test_reads_updated_schema_filename_from_pg_to_gcs_operator(self):
+        """When format switches, PostgresToBigQuery should read updated schema_filename."""
+        from airsql.transfers.postgres_bigquery import PostgresToBigQueryOperator
+
+        # The fix: PostgresToBigQueryOperator reads schema_filename from the export operator
+        # after execute(), so when format switches from CSV to JSONL, it uses the correct
+        # schema filename (data.jsonl.schema.json instead of data.schema.json)
+        op = PostgresToBigQueryOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT * FROM t',
+            gcs_bucket='bucket',
+            gcs_temp_path='temp/data.csv',
+            destination_project_dataset_table='project.dataset.table',
+            gcp_conn_id='gcp',
+            export_format='csv',
+            schema_filename='temp/data.schema.json',
+            emit_asset=False,
+            check_source_exists=False,
+        )
+
+        # Simulate what PostgresToGCSOperator would set after format switch
+        mock_pg_to_gcs = MagicMock()
+        mock_pg_to_gcs.execute.return_value = 'gs://bucket/temp/data.jsonl'
+        mock_pg_to_gcs.actual_export_format = 'jsonl'
+        mock_pg_to_gcs.schema_filename = 'temp/data.jsonl.schema.json'
+
+        with patch.object(op, '_ensure_bigquery_dataset'):
+            with patch.object(op, '_cleanup_temp_files'):
+                with patch(
+                    'airsql.transfers.postgres_gcs.PostgresToGCSOperator',
+                    return_value=mock_pg_to_gcs,
+                ):
+                    # Mock GCSToBigQueryOperator to capture kwargs
+                    captured = {}
+
+                    def capture_gcs_to_bq(**kwargs):
+                        captured.update(kwargs)
+                        return MagicMock()
+
+                    with patch.dict(
+                        'sys.modules',
+                        {
+                            'airflow.providers.google.cloud.transfers.gcs_to_bigquery': MagicMock(
+                                GCSToBigQueryOperator=capture_gcs_to_bq
+                            )
+                        },
+                    ):
+                        op.execute({})
+
+        # Verify the schema_object uses the updated filename
+        assert captured.get('schema_object') == 'temp/data.jsonl.schema.json'
+        assert captured.get('source_format') == 'NEWLINE_DELIMITED_JSON'

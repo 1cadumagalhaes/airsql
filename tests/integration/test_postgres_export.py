@@ -1106,3 +1106,75 @@ class TestSchemaExport:
             with pg_engine.connect() as conn:
                 conn.execute(text('DROP TABLE IF EXISTS test_schema_json'))
                 conn.commit()
+
+    def test_schema_filename_updated_on_format_switch(self, pg_engine, pg_conn_factory):
+        """Test that schema_filename is updated when format auto-switches from CSV to JSONL."""
+        with pg_engine.connect() as conn:
+            conn.execute(
+                text("""
+                DROP TABLE IF EXISTS test_schema_switch;
+                CREATE TABLE test_schema_switch (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT,
+                    data JSONB
+                );
+                INSERT INTO test_schema_switch VALUES (1, 'test', '{"key": "value"}');
+            """)
+            )
+            conn.commit()
+
+        try:
+            from airsql.transfers.postgres_gcs import PostgresToGCSOperator
+
+            with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as tmp:
+                tmp_path = tmp.name
+
+            uploads = {}
+
+            def capture_upload(bucket_name, object_name, data=None, **kwargs):
+                if data:
+                    uploads[object_name] = data
+
+            from unittest.mock import MagicMock, patch
+
+            mock_gcs = MagicMock()
+            mock_gcs.upload = capture_upload
+
+            op = PostgresToGCSOperator(
+                task_id='test_export',
+                postgres_conn_id='NOT_USED',
+                sql='SELECT name, data FROM test_schema_switch',
+                bucket='test-bucket',
+                filename='data.csv',
+                export_format='csv',
+                schema_filename='data.schema.json',
+                auto_switch_format=True,
+                use_copy=False,
+            )
+
+            with (
+                patch('airsql.transfers.postgres_gcs.PostgresHook') as mock_pg,
+                patch('airsql.transfers.postgres_gcs.GCSHook', return_value=mock_gcs),
+            ):
+                mock_pg.return_value.get_sqlalchemy_engine.return_value = pg_engine
+                mock_pg.return_value.get_conn = pg_conn_factory
+                op.execute({})
+
+            import json
+
+            assert op.actual_export_format == 'jsonl'
+            assert op.filename == 'data.jsonl'
+            assert op.schema_filename == 'data.jsonl.schema.json'
+
+            schema_key = 'data.jsonl.schema.json'
+            assert schema_key in uploads, (
+                f'Expected {schema_key} in uploads, got {list(uploads.keys())}'
+            )
+            schema = json.loads(uploads[schema_key])
+            assert isinstance(schema, list)
+
+        finally:
+            os.remove(tmp_path)
+            with pg_engine.connect() as conn:
+                conn.execute(text('DROP TABLE IF EXISTS test_schema_switch'))
+                conn.commit()
