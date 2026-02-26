@@ -85,12 +85,15 @@ class GCSToPostgresOperator(BaseOperator):
         import pandas as pd  # noqa: PLC0415
 
         if hasattr(df, '__arrow_c_stream__'):
-            df_clean = df.where(pd.notna(df), None)
+            # PyArrow-backed DataFrames: convert to object dtype while preserving None
+            df_clean = df.astype(object).where(pd.notna(df), None)
         else:
             df_clean = df.convert_dtypes().replace({pd.NA: None, np.nan: None})
 
         def convert_value(val):
             if val is None:
+                return None
+            if pd.isna(val):
                 return None
             if isinstance(val, (dict, list)):
                 return json.dumps(val)
@@ -132,9 +135,9 @@ class GCSToPostgresOperator(BaseOperator):
     def _coerce_column_types(self, df, column_types):
         """Coerce DataFrame column types to match PostgreSQL table schema.
 
-        BigQuery exports integers as floats (e.g., 0.0), but PostgreSQL COPY
-        cannot parse "0.0" as an integer. This method converts float columns
-        to integers when the target column is an integer type.
+        BigQuery exports to Parquet may produce string values (e.g., "0.0", "100.5")
+        even for numeric columns. This method coerces DataFrame columns to match
+        the target PostgreSQL types.
 
         Args:
             df: DataFrame to coerce
@@ -143,6 +146,7 @@ class GCSToPostgresOperator(BaseOperator):
         Returns:
             DataFrame with coerced column types
         """
+        import pandas as pd  # noqa: PLC0415
 
         INTEGER_TYPES = {
             'integer',
@@ -157,7 +161,21 @@ class GCSToPostgresOperator(BaseOperator):
             'smallserial',
         }
 
+        NUMERIC_TYPES = {
+            'numeric',
+            'decimal',
+            'double precision',
+            'float',
+            'float4',
+            'float8',
+            'real',
+        }
+
+        BOOLEAN_TYPES = {'boolean', 'bool'}
+
         BQ_INTEGER_TYPES = {'INTEGER', 'INT64'}
+        BQ_NUMERIC_TYPES = {'FLOAT', 'FLOAT64', 'NUMERIC', 'BIGNUMERIC'}
+        BQ_BOOLEAN_TYPES = {'BOOLEAN', 'BOOL'}
 
         df_copy = df.copy()
 
@@ -166,39 +184,88 @@ class GCSToPostgresOperator(BaseOperator):
                 continue
 
             pg_type_lower = pg_type.lower()
-
-            is_integer_target = pg_type_lower in INTEGER_TYPES
-            is_integer_source = (
-                self.source_schema
-                and self.source_schema.get(col, '').upper() in BQ_INTEGER_TYPES
+            col_dtype = str(df_copy[col].dtype)
+            bq_type = (
+                self.source_schema.get(col, '').upper() if self.source_schema else None
             )
 
+            is_integer_target = pg_type_lower in INTEGER_TYPES
+            is_integer_source = bq_type in BQ_INTEGER_TYPES
+
+            is_numeric_target = pg_type_lower in NUMERIC_TYPES
+            is_numeric_source = bq_type in BQ_NUMERIC_TYPES
+
+            is_boolean_target = pg_type_lower in BOOLEAN_TYPES
+            is_boolean_source = bq_type in BQ_BOOLEAN_TYPES
+
+            # Coerce to integer
             if is_integer_target or is_integer_source:
-                col_dtype = str(df_copy[col].dtype)
+                # Skip if already an integer type
+                if (
+                    col_dtype.startswith('int')
+                    or col_dtype.startswith('Int')
+                    or col_dtype.startswith('uint')
+                ):
+                    self.log.debug(
+                        f'Column {col} already integer type {col_dtype}, skipping coercion'
+                    )
+                    continue
+
                 self.log.info(
                     f'Column {col}: dtype={col_dtype}, pg_type={pg_type}, '
-                    f'bq_type={self.source_schema.get(col) if self.source_schema else None}'
+                    f'bq_type={bq_type}, coercing to Int64'
                 )
                 if col_dtype in {'float64', 'float32'}:
-                    self.log.info(f'Coercing column {col} from {col_dtype} to Int64')
                     df_copy[col] = df_copy[col].astype('Int64')
+                elif col_dtype in {'object', 'str', 'string[pyarrow]'}:
+                    df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').astype(
+                        'Int64'
+                    )
                 elif hasattr(df_copy[col].dtype, 'pyarrow_dtype'):
                     import pyarrow as pa  # noqa: PLC0415
 
                     if pa.types.is_floating(df_copy[col].dtype.pyarrow_dtype):
-                        self.log.info(
-                            f'Coercing column {col} from pyarrow:{df_copy[col].dtype.pyarrow_dtype} to int '
-                            f'(pg_type={pg_type}, bq_type={self.source_schema.get(col) if self.source_schema else None})'
-                        )
                         df_copy[col] = df_copy[col].astype('Int64')
+                    elif pa.types.is_string(df_copy[col].dtype.pyarrow_dtype):
+                        df_copy[col] = pd.to_numeric(
+                            df_copy[col], errors='coerce'
+                        ).astype('Int64')
                     else:
                         self.log.debug(
-                            f'Column {col} has pyarrow type {df_copy[col].dtype.pyarrow_dtype}, not floating'
+                            f'Column {col} has pyarrow type {df_copy[col].dtype.pyarrow_dtype}, not floating/string'
                         )
-                else:
-                    self.log.debug(
-                        f'Column {col} has dtype {df_copy[col].dtype}, skipping coercion'
-                    )
+
+            # Coerce to numeric/float
+            elif is_numeric_target or is_numeric_source:
+                self.log.info(
+                    f'Column {col}: dtype={col_dtype}, pg_type={pg_type}, '
+                    f'bq_type={bq_type}, coercing to float64'
+                )
+                if col_dtype in {'object', 'str', 'string[pyarrow]'}:
+                    df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce')
+                elif hasattr(df_copy[col].dtype, 'pyarrow_dtype'):
+                    import pyarrow as pa  # noqa: PLC0415
+
+                    if pa.types.is_string(df_copy[col].dtype.pyarrow_dtype):
+                        df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce')
+
+            # Coerce to boolean
+            elif is_boolean_target or is_boolean_source:
+                self.log.info(
+                    f'Column {col}: dtype={col_dtype}, pg_type={pg_type}, '
+                    f'bq_type={bq_type}, coercing to boolean'
+                )
+                if col_dtype in {'object', 'str', 'string[pyarrow]'}:
+                    df_copy[col] = df_copy[col].map({
+                        'true': True,
+                        'True': True,
+                        'TRUE': True,
+                        'false': False,
+                        'False': False,
+                        'FALSE': False,
+                        '1': True,
+                        '0': False,
+                    })
 
         return df_copy
 
@@ -254,7 +321,6 @@ class GCSToPostgresOperator(BaseOperator):
         return 'csv'
 
     def execute(self, context):  # noqa: PLR0912, PLR0914
-        import numpy as np  # noqa: PLC0415
         import pandas as pd  # noqa: PLC0415
 
         from airsql import __version__
@@ -344,7 +410,7 @@ class GCSToPostgresOperator(BaseOperator):
         model_columns = [rec[0] for rec in columns_from_db_records]
         column_types = {rec[0]: rec[1] for rec in columns_from_db_records}
         common_columns = [col for col in df.columns if col in model_columns]
-        df_filtered = df[common_columns].replace({np.nan: None})
+        df_filtered = df[common_columns].where(pd.notna(df[common_columns]), None)
 
         self.log.info(f'PostgreSQL column types: {column_types}')
         if self.source_schema:

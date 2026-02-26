@@ -331,3 +331,81 @@ class TestCoerceColumnTypes:
         result = op._coerce_column_types(df, column_types)
 
         assert result['id'].tolist() == [1, 2, 3]
+
+    def test_coerce_object_dtype_string_numbers(self):
+        """Test conversion of object dtype containing string numbers like '0.0'."""
+        df = pd.DataFrame({
+            'id': ['1.0', '2.0', '3.0'],
+            'count': ['10.0', '20.0', None],
+        })
+
+        column_types = {'id': 'integer', 'count': 'integer'}
+
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            source_schema={'id': 'INTEGER', 'count': 'INTEGER'},
+        )
+
+        result = op._coerce_column_types(df, column_types)
+
+        assert str(result['id'].dtype) == 'Int64'
+        assert str(result['count'].dtype) == 'Int64'
+        assert result['id'].tolist() == [1, 2, 3]
+        assert result['count'].tolist()[0] == 10
+        assert result['count'].tolist()[1] == 20
+        assert pd.isna(result['count'].tolist()[2])
+
+    def test_coerce_numeric_from_string(self):
+        """Test conversion of string numbers to numeric/float types."""
+        df = pd.DataFrame({
+            'price': ['100.50', '200.75', '300.00'],
+            'discount': ['0.1', '0.2', None],
+        })
+
+        column_types = {'price': 'numeric', 'discount': 'double precision'}
+
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            source_schema={'price': 'FLOAT', 'discount': 'FLOAT64'},
+        )
+
+        result = op._coerce_column_types(df, column_types)
+
+        assert result['price'].tolist() == [100.50, 200.75, 300.00]
+        assert result['discount'].tolist()[0] == 0.1
+        assert result['discount'].tolist()[1] == 0.2
+
+    def test_coerce_boolean_from_string(self):
+        """Test conversion of string booleans to boolean type."""
+        df = pd.DataFrame({
+            'active': ['true', 'false', 'TRUE'],
+            'enabled': ['True', 'False', None],
+        })
+
+        column_types = {'active': 'boolean', 'enabled': 'boolean'}
+
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            source_schema={'active': 'BOOLEAN', 'enabled': 'BOOL'},
+        )
+
+        result = op._coerce_column_types(df, column_types)
+
+        assert result['active'].tolist() == [True, False, True]
+        assert result['enabled'].tolist()[0] is True
+        assert result['enabled'].tolist()[1] is False
