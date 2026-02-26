@@ -95,6 +95,7 @@ ignore = [
     "PLC0415",
     "PLC2701",
     "B903",
+    "F841"
 ]
 "tests/conftest.py" = ["F821"]
 

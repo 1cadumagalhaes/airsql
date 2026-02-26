@@ -1,6 +1,4 @@
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from airsql.hooks import DEFAULT_BIGQUERY_LOCATION, SQLHookManager
 from airsql.table import Table
