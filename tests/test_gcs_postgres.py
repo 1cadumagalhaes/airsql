@@ -228,8 +228,9 @@ class TestCoerceColumnTypes:
 
         result = op._coerce_column_types(df, column_types)
 
-        assert result['id'].dtype == 'int64'
-        assert result['count'].dtype == 'int64'
+        # Int64 is pandas nullable integer type (handles NaN)
+        assert str(result['id'].dtype) == 'Int64'
+        assert str(result['count'].dtype) == 'Int64'
         assert result['id'].tolist() == [1, 2, 3]
         assert result['count'].tolist() == [10, 20, 30]
 
@@ -255,8 +256,9 @@ class TestCoerceColumnTypes:
 
         result = op._coerce_column_types(df, column_types)
 
-        assert result['id'].dtype == 'int64'
-        assert result['count'].dtype == 'int64'
+        # Int64 is pandas nullable integer type (handles NaN)
+        assert str(result['id'].dtype) == 'Int64'
+        assert str(result['count'].dtype) == 'Int64'
 
     def test_coerce_preserves_float_for_float_columns(self):
         """Test that float columns are not converted when target is float."""

@@ -143,7 +143,6 @@ class GCSToPostgresOperator(BaseOperator):
         Returns:
             DataFrame with coerced column types
         """
-        import pandas as pd  # noqa: PLC0415
 
         INTEGER_TYPES = {
             'integer',
@@ -180,9 +179,8 @@ class GCSToPostgresOperator(BaseOperator):
                         f'Coercing column {col} from {df_copy[col].dtype} to int '
                         f'(pg_type={pg_type}, bq_type={self.source_schema.get(col) if self.source_schema else None})'
                     )
-                    df_copy[col] = df_copy[col].apply(
-                        lambda x: int(x) if pd.notna(x) and x is not None else x
-                    )
+                    # Use nullable Int64 to handle NaN values while keeping integers
+                    df_copy[col] = df_copy[col].astype('Int64')
                 elif hasattr(df_copy[col].dtype, 'pyarrow_dtype'):
                     import pyarrow as pa  # noqa: PLC0415
 
@@ -191,9 +189,7 @@ class GCSToPostgresOperator(BaseOperator):
                             f'Coercing column {col} from pyarrow:{df_copy[col].dtype.pyarrow_dtype} to int '
                             f'(pg_type={pg_type}, bq_type={self.source_schema.get(col) if self.source_schema else None})'
                         )
-                        df_copy[col] = df_copy[col].apply(
-                            lambda x: int(x) if pd.notna(x) and x is not None else x
-                        )
+                        df_copy[col] = df_copy[col].astype('Int64')
                     else:
                         self.log.debug(
                             f'Column {col} has pyarrow type {df_copy[col].dtype.pyarrow_dtype}, not floating'
