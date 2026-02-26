@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 BIGQUERY_TABLE_NAME_PARTS = 2
 DEFAULT_TIMESTAMP_COLUMNS = ['updated_at', 'atualizado_em']
+DEFAULT_BIGQUERY_LOCATION = 'us-central1'
 
 
 @lru_cache(maxsize=128)
@@ -120,8 +121,17 @@ class SQLHookManager:
         table: Table,
         if_exists: str = 'append',
         timestamp_column: Optional[str] = None,
+        dataset_location: Optional[str] = None,
     ) -> None:
-        """Write a DataFrame to a table with automatic timestamp handling."""
+        """Write a DataFrame to a table with automatic timestamp handling.
+
+        Args:
+            df: DataFrame to write
+            table: Target table reference
+            if_exists: What to do if table exists ('append', 'replace', 'fail', 'truncate')
+            timestamp_column: Column to set automatic timestamp
+            dataset_location: BigQuery dataset location/region (defaults to table.location or 'us-central1')
+        """
         logger = logging.getLogger(__name__)
         logger.info(f'Writing DataFrame with {len(df)} rows to {table.table_name}')
         logger.debug(f'DataFrame columns: {list(df.columns)}')
@@ -130,14 +140,16 @@ class SQLHookManager:
         df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
 
         if if_exists == 'truncate':
-            # Use truncate method to preserve table structure and sequences
-            self.truncate_table_content(df_with_timestamps, table, timestamp_column)
+            self.truncate_table_content(
+                df_with_timestamps, table, timestamp_column, dataset_location
+            )
         elif table.is_bigquery:
-            self._write_to_bigquery(df_with_timestamps, table, if_exists)
+            self._write_to_bigquery(
+                df_with_timestamps, table, if_exists, dataset_location
+            )
         elif table.is_postgres:
             self._write_to_postgres(df_with_timestamps, table, if_exists)
         else:
-            # Get connection type for better error message
             try:
                 connection = BaseHook.get_connection(table.conn_id)
                 conn_type = connection.conn_type if connection.conn_type else 'unknown'
@@ -154,13 +166,24 @@ class SQLHookManager:
                 ) from e
 
     def replace_table_content(
-        self, df, table: Table, timestamp_column: Optional[str] = None
+        self,
+        df,
+        table: Table,
+        timestamp_column: Optional[str] = None,
+        dataset_location: Optional[str] = None,
     ) -> None:
-        """Replace the content of a table with DataFrame data."""
+        """Replace the content of a table with DataFrame data.
+
+        Args:
+            df: DataFrame to write
+            table: Target table reference
+            timestamp_column: Column to set automatic timestamp
+            dataset_location: BigQuery dataset location/region (defaults to table.location or 'us-central1')
+        """
         df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
 
         if table.is_bigquery:
-            self._replace_bigquery_table(df_with_timestamps, table)
+            self._replace_bigquery_table(df_with_timestamps, table, dataset_location)
         elif table.is_postgres:
             self._replace_postgres_table(df_with_timestamps, table)
         else:
@@ -173,8 +196,18 @@ class SQLHookManager:
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
+        dataset_location: Optional[str] = None,
     ) -> None:
-        """Merge/upsert DataFrame data into a table."""
+        """Merge/upsert DataFrame data into a table.
+
+        Args:
+            df: DataFrame to merge
+            table: Target table reference
+            conflict_columns: Columns to use for conflict detection
+            update_columns: Columns to update on conflict (defaults to all except conflict columns)
+            timestamp_column: Column to set automatic timestamp
+            dataset_location: BigQuery dataset location/region (defaults to table.location or 'us-central1')
+        """
         logger = logging.getLogger(__name__)
         logger.info(f'Merging DataFrame with {len(df)} rows into {table.table_name}')
         logger.debug(f'Conflict columns: {conflict_columns}')
@@ -185,7 +218,11 @@ class SQLHookManager:
 
         if table.is_bigquery:
             self._merge_bigquery_table(
-                df_with_timestamps, table, conflict_columns, update_columns
+                df_with_timestamps,
+                table,
+                conflict_columns,
+                update_columns,
+                dataset_location,
             )
         elif table.is_postgres:
             self._merge_postgres_table(
@@ -195,14 +232,24 @@ class SQLHookManager:
             raise ValueError(f'Unsupported database type for table: {table}')
 
     def truncate_table_content(
-        self, df, table: Table, timestamp_column: Optional[str] = None
+        self,
+        df,
+        table: Table,
+        timestamp_column: Optional[str] = None,
+        dataset_location: Optional[str] = None,
     ) -> None:
-        """Truncate the content of a table and insert new data, preserving table structure and sequences."""
+        """Truncate the content of a table and insert new data, preserving table structure and sequences.
+
+        Args:
+            df: DataFrame to write
+            table: Target table reference
+            timestamp_column: Column to set automatic timestamp
+            dataset_location: BigQuery dataset location/region (defaults to table.location or 'us-central1')
+        """
         df_with_timestamps = self._add_automatic_timestamps(df, table, timestamp_column)
 
         if table.is_bigquery:
-            # For BigQuery, truncate is equivalent to replace as it doesn't have sequences
-            self._replace_bigquery_table(df_with_timestamps, table)
+            self._replace_bigquery_table(df_with_timestamps, table, dataset_location)
         elif table.is_postgres:
             self._truncate_postgres_table(df_with_timestamps, table)
         else:
@@ -304,10 +351,48 @@ class SQLHookManager:
         ]
 
     @staticmethod
-    def _write_to_bigquery(df, table: Table, if_exists: str = 'append') -> None:
-        """Write DataFrame to BigQuery table."""
+    def _ensure_bigquery_dataset(
+        hook: Any,
+        project_id: str,
+        dataset_id: str,
+        location: str = DEFAULT_BIGQUERY_LOCATION,
+    ) -> None:
+        """Ensure BigQuery dataset exists, creating if necessary.
+
+        Args:
+            hook: BigQueryHook instance
+            project_id: GCP project ID
+            dataset_id: BigQuery dataset ID
+            location: BigQuery location/region (defaults to 'us-central1')
+        """
+        from google.cloud import bigquery  # noqa: PLC0415
+
+        try:
+            client = hook.get_client(project_id=project_id, location=location)
+            dataset_ref = bigquery.Dataset(f'{project_id}.{dataset_id}')
+            dataset_ref.location = location
+            client.create_dataset(dataset_ref, exists_ok=True)
+            logger.info(f'Ensured BigQuery dataset exists: {project_id}.{dataset_id}')
+        except Exception as e:
+            logger.warning(f'Failed to ensure BigQuery dataset exists: {e}')
+
+    @staticmethod
+    def _write_to_bigquery(
+        df,
+        table: Table,
+        if_exists: str = 'append',
+        dataset_location: Optional[str] = None,
+    ) -> None:
+        """Write DataFrame to BigQuery table.
+
+        Args:
+            df: DataFrame to write
+            table: Target table reference
+            if_exists: What to do if table exists ('append', 'replace', 'fail')
+            dataset_location: BigQuery dataset location/region (defaults to table.location or 'us-central1')
+        """
         from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
-            BigQueryHook,  # noqa: PLC0415
+            BigQueryHook,
         )
         from google.cloud import bigquery  # noqa: PLC0415
 
@@ -319,7 +404,10 @@ class SQLHookManager:
         else:
             raise ValueError(f'Invalid BigQuery table name: {table.table_name}')
 
-        client = hook.get_client(project_id=project_id, location=table.location)
+        location = dataset_location or table.location or DEFAULT_BIGQUERY_LOCATION
+        SQLHookManager._ensure_bigquery_dataset(hook, project_id, dataset_id, location)
+
+        client = hook.get_client(project_id=project_id, location=location)
         destination_table_ref = client.dataset(dataset_id).table(table_id)
 
         # Map if_exists to BigQuery write disposition
@@ -349,9 +437,9 @@ class SQLHookManager:
             ]
 
         job = client.load_table_from_dataframe(
-            df, destination_table_ref, job_config=job_config, location=table.location
+            df, destination_table_ref, job_config=job_config, location=location
         )
-        job.result()  # Wait for the job to complete
+        job.result()
 
     @staticmethod
     def _write_to_postgres(df, table: Table, if_exists: str = 'append') -> None:
@@ -377,10 +465,20 @@ class SQLHookManager:
         )
 
     @staticmethod
-    def _replace_bigquery_table(df, table: Table) -> None:
-        """Replace BigQuery table content using WRITE_TRUNCATE."""
+    def _replace_bigquery_table(
+        df,
+        table: Table,
+        dataset_location: Optional[str] = None,
+    ) -> None:
+        """Replace BigQuery table content using WRITE_TRUNCATE.
+
+        Args:
+            df: DataFrame to write
+            table: Target table reference
+            dataset_location: BigQuery dataset location/region (defaults to table.location or 'us-central1')
+        """
         from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
-            BigQueryHook,  # noqa: PLC0415
+            BigQueryHook,
         )
         from google.cloud import bigquery  # noqa: PLC0415
 
@@ -392,7 +490,10 @@ class SQLHookManager:
         else:
             raise ValueError(f'Invalid BigQuery table name: {table.table_name}')
 
-        client = hook.get_client(project_id=project_id, location=table.location)
+        location = dataset_location or table.location or DEFAULT_BIGQUERY_LOCATION
+        SQLHookManager._ensure_bigquery_dataset(hook, project_id, dataset_id, location)
+
+        client = hook.get_client(project_id=project_id, location=location)
         destination_table_ref = client.dataset(dataset_id).table(table_id)
 
         job_config = bigquery.LoadJobConfig(
@@ -412,9 +513,9 @@ class SQLHookManager:
             ]
 
         job = client.load_table_from_dataframe(
-            df, destination_table_ref, job_config=job_config, location=table.location
+            df, destination_table_ref, job_config=job_config, location=location
         )
-        job.result()  # Wait for the job to complete
+        job.result()
 
     @staticmethod
     def _replace_postgres_table(df, table: Table) -> None:
@@ -446,11 +547,20 @@ class SQLHookManager:
         table: Table,
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
+        dataset_location: Optional[str] = None,
     ) -> None:
-        """Merge DataFrame into BigQuery table using MERGE statement."""
+        """Merge DataFrame into BigQuery table using MERGE statement.
+
+        Args:
+            df: DataFrame to merge
+            table: Target table reference
+            conflict_columns: Columns to use for conflict detection
+            update_columns: Columns to update on conflict (defaults to all except conflict columns)
+            dataset_location: BigQuery dataset location/region (defaults to table.location or 'us-central1')
+        """
         import pandas as pd  # noqa: PLC0415
         from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
-            BigQueryHook,  # noqa: PLC0415
+            BigQueryHook,
         )
         from google.cloud import bigquery  # noqa: PLC0415
 
@@ -463,29 +573,29 @@ class SQLHookManager:
             raise ValueError(f'Invalid BigQuery table name: {table.table_name}')
         temp_table_id = f'{table_id}_temp_{int(pd.Timestamp.now().timestamp())}'
 
-        client = hook.get_client(project_id=project_id, location=table.location)
+        location = dataset_location or table.location or DEFAULT_BIGQUERY_LOCATION
+        SQLHookManager._ensure_bigquery_dataset(hook, project_id, dataset_id, location)
+
+        client = hook.get_client(project_id=project_id, location=location)
         temp_table_ref = client.dataset(dataset_id).table(temp_table_id)
 
         try:
-            # Load DataFrame to temporary table
             job_config = bigquery.LoadJobConfig(
                 write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
                 create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
             )
             job = client.load_table_from_dataframe(
-                df, temp_table_ref, job_config=job_config, location=table.location
+                df, temp_table_ref, job_config=job_config, location=location
             )
-            job.result()  # Wait for the job to complete
+            job.result()
             temp_table_full = f'{project_id}.{dataset_id}.{temp_table_id}'
             all_columns = df.columns.tolist()
 
-            # Use provided update_columns or default to all columns except conflict columns
             if update_columns is None:
                 columns_to_update = [
                     col for col in all_columns if col not in conflict_columns
                 ]
             else:
-                # Validate that update_columns are in the DataFrame
                 missing_cols = [col for col in update_columns if col not in all_columns]
                 if missing_cols:
                     raise ValueError(
@@ -505,10 +615,10 @@ WHEN NOT MATCHED THEN
 """  # noqa: S608
             job_config = bigquery.QueryJobConfig(
                 use_legacy_sql=False,
-                location=table.location,
+                location=location,
             )
             query_job = client.query(merge_sql, job_config=job_config)
-            query_job.result()  # Wait for the job to complete
+            query_job.result()
 
         finally:
             try:

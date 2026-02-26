@@ -58,6 +58,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         partition_by: Optional[str] = None,
         partition_type: str = PartitionType.DAY,
         cluster_fields: Optional[List[str]] = None,
+        dataset_location: str = 'us-central1',
         dry_run: bool = False,
         **kwargs,
     ):
@@ -101,6 +102,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.partition_by = partition_by
         self.partition_type = partition_type.upper()
         self.cluster_fields = cluster_fields or []
+        self.dataset_location = dataset_location
         self.dry_run = dry_run
 
         if self.partition_type not in {'DAY', 'HOUR', 'MONTH', 'YEAR'}:
@@ -364,7 +366,7 @@ class PostgresToBigQueryOperator(BaseOperator):
 
             # Create dataset if it doesn't exist using exists_ok parameter
             dataset = bigquery.Dataset(f'{project_id}.{dataset_id}')
-            dataset.location = 'US'  # Default location; can be customized
+            dataset.location = self.dataset_location
 
             self.log.info(
                 f'Ensuring BigQuery dataset exists: {project_id}.{dataset_id}'

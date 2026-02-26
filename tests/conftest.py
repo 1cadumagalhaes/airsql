@@ -85,6 +85,16 @@ class _BigQueryHook(_BaseHook):
     ) -> pd.DataFrame:
         return pd.DataFrame({'id': [1, 2], 'value': ['a', 'b']})
 
+    def get_client(
+        self, project_id: str | None = None, location: str | None = None
+    ) -> MagicMock:
+        mock_client = MagicMock()
+        mock_client.dataset.return_value.table.return_value = MagicMock()
+        mock_client.load_table_from_dataframe.return_value.result.return_value = None
+        mock_client.query.return_value.result.return_value = None
+        mock_client.create_dataset.return_value = None
+        return mock_client
+
 
 class _GCSHook:
     def __init__(
