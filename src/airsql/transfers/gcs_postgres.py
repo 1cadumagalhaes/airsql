@@ -1,3 +1,4 @@
+import json
 import time
 from io import BytesIO, StringIO
 
@@ -15,6 +16,8 @@ from airsql.utils import DataValidator, OperationSummary
 
 
 class GCSToPostgresOperator(BaseOperator):
+    JSON_COLUMN_TYPES = {'JSON', 'JSONB'}
+
     def __init__(
         self,
         target_table_name: str,
@@ -171,6 +174,14 @@ class GCSToPostgresOperator(BaseOperator):
         model_columns = [rec[0] for rec in columns_from_db_records]
         common_columns = [col for col in df.columns if col in model_columns]
         df_filtered = df[common_columns].replace({np.nan: None})
+
+        # Detect JSON/JSONB columns and fix JSON quoting from BigQuery exports
+        json_columns = self._detect_json_columns(pg_hook, schema, table_name_simple)
+        if json_columns and file_format == 'jsonl':
+            self.log.info(f'Detected JSON columns, fixing quoting: {json_columns}')
+            df_filtered = GCSToPostgresOperator._fix_json_quoting(
+                df_filtered, json_columns
+            )
 
         # Validate DataFrame
         validation_result = DataValidator.validate_columns(
@@ -401,3 +412,75 @@ class GCSToPostgresOperator(BaseOperator):
         finally:
             cursor.close()
             conn.close()
+
+    @staticmethod
+    def _detect_json_columns(pg_hook, schema: str, table_name: str) -> set:
+        """Detect JSON/JSONB columns in the target PostgreSQL table.
+
+        Args:
+            pg_hook: PostgresHook instance
+            schema: Schema name
+            table_name: Table name
+
+        Returns:
+            Set of column names that are JSON/JSONB type
+        """
+        json_columns = set()
+        try:
+            sql = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+            AND data_type IN ('json', 'jsonb')
+            """
+            records = pg_hook.get_records(sql, parameters=(schema, table_name))
+            for record in records:
+                json_columns.add(record[0])
+        except Exception:  # noqa: S110
+            pass
+        return json_columns
+
+    @staticmethod
+    def _fix_json_quoting(df, json_columns: set):
+        """Fix JSON quoting from BigQuery exports.
+
+        BigQuery exports JSON values with single quotes (Python dict repr format),
+        but PostgreSQL expects standard JSON with double quotes.
+
+        This method detects values that look like Python dict/list literals
+        and converts them to valid JSON strings.
+
+        Args:
+            df: DataFrame with potential JSON columns
+            json_columns: Set of column names that should contain JSON data
+
+        Returns:
+            DataFrame with fixed JSON columns
+        """
+        import ast  # noqa: PLC0415
+
+        import pandas as pd  # noqa: PLC0415
+
+        for col in json_columns:
+            if col not in df.columns:
+                continue
+
+            def fix_json_value(val):
+                if val is None:
+                    return None
+                try:
+                    if pd.isna(val):
+                        return None
+                except TypeError:
+                    pass
+                if isinstance(val, str):
+                    try:
+                        parsed = ast.literal_eval(val)
+                        return json.dumps(parsed)
+                    except (ValueError, SyntaxError):
+                        return val
+                return val
+
+            df[col] = df[col].apply(fix_json_value)
+
+        return df
