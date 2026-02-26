@@ -254,6 +254,11 @@ class PostgresToGCSOperator(BaseOperator):
     :type csv_kwargs: dict
     :param parquet_kwargs: (Optional) Arguments to pass to `DataFrame.to_parquet()`.
     :type parquet_kwargs: dict
+    :param auto_switch_format: (Optional) If True, detect problematic characters
+        (quotes, newlines) in text columns and automatically switch to JSONL format.
+        If False, use requested format with proper CSV quoting options.
+        Default is True.
+    :type auto_switch_format: bool
     """
 
     template_fields: Sequence[str] = (
@@ -264,6 +269,8 @@ class PostgresToGCSOperator(BaseOperator):
     )
     template_ext: Sequence[str] = ('.sql',)
     ui_color = '#0077b6'
+
+    PROBLEMATIC_CHARACTERS = {'"', '\n', '\r'}
 
     def __init__(  # noqa: PLR0913
         self,
@@ -280,16 +287,15 @@ class PostgresToGCSOperator(BaseOperator):
         use_temp_file: bool = False,
         csv_kwargs: Optional[dict] = None,
         parquet_kwargs: Optional[dict] = None,
-        # How to detect JSON/complex types for schema generation.
         schema_detection_mode: str = SchemaDetectionMode.POSTGRES,
         sampling_size: int = 100,
         sampling_threshold: float = 0.9,
+        auto_switch_format: bool = True,
         dry_run: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
 
-        # Validate export format
         if export_format not in PostgresExportFormat.values():
             raise ValueError(
                 f"Invalid export_format: '{export_format}'. "
@@ -297,7 +303,6 @@ class PostgresToGCSOperator(BaseOperator):
                 f'Note: Parquet is not supported for Postgres export.'
             )
 
-        # Validate schema detection mode
         if schema_detection_mode not in SchemaDetectionMode.values():
             raise ValueError(
                 f"Invalid schema_detection_mode: '{schema_detection_mode}'. "
@@ -319,6 +324,7 @@ class PostgresToGCSOperator(BaseOperator):
         self.schema_detection_mode = schema_detection_mode
         self.sampling_size = sampling_size
         self.sampling_threshold = sampling_threshold
+        self.auto_switch_format = auto_switch_format
         self.dry_run = dry_run
 
         if self.export_format not in {'csv', 'parquet', 'jsonl'}:
@@ -388,6 +394,55 @@ class PostgresToGCSOperator(BaseOperator):
 
         return column_types
 
+    def _detect_problematic_columns(
+        self, pg_hook, text_columns: List[str], sample_size: int = 1000
+    ) -> set:
+        """Detect text columns containing problematic characters for CSV.
+
+        Problematic characters are double quotes, newlines, and carriage returns.
+
+        Args:
+            pg_hook: PostgresHook instance
+            text_columns: List of text/string column names to sample
+            sample_size: Maximum number of rows to sample
+
+        Returns:
+            Set of column names that contain problematic characters.
+        """
+        problematic_columns = set()
+        if not text_columns:
+            return problematic_columns
+
+        try:
+            quoted_cols = [
+                f'"{col}"' if col.lower() != col else col for col in text_columns
+            ]
+            cols_str = ', '.join(quoted_cols)
+            sample_query = (
+                f'SELECT {cols_str} FROM ({self.sql}) AS subquery LIMIT {sample_size}'  # noqa: S608
+            )
+
+            conn = pg_hook.get_conn()
+            cur = conn.cursor()
+            cur.execute(sample_query)
+
+            for row in cur:
+                for i, col in enumerate(text_columns):
+                    if col in problematic_columns:
+                        continue
+                    val = row[i]
+                    if val is not None and any(
+                        c in str(val) for c in self.PROBLEMATIC_CHARACTERS
+                    ):
+                        problematic_columns.add(col)
+
+            cur.close()
+            conn.close()
+        except Exception as e:
+            self.log.warning(f'Failed to detect problematic columns: {e}')
+
+        return problematic_columns
+
     def _build_copy_query(self, column_types: Dict[str, str], json_columns: set) -> str:
         """Build COPY TO query with proper type handling.
 
@@ -452,12 +507,12 @@ class PostgresToGCSOperator(BaseOperator):
         cursor = conn.cursor()
 
         try:
-            # Determine format for COPY
             if use_jsonl:
                 copy_sql = f'COPY ({copy_query}) TO STDOUT'
             else:
                 copy_sql = (
-                    f'COPY ({copy_query}) TO STDOUT WITH (FORMAT CSV, HEADER true)'
+                    f'COPY ({copy_query}) TO STDOUT WITH '
+                    f"(FORMAT CSV, HEADER true, QUOTE '\"', ESCAPE '\"', FORCE_QUOTE *)"
                 )
 
             # Get GCS client for streaming upload
@@ -530,14 +585,14 @@ class PostgresToGCSOperator(BaseOperator):
         cursor = conn.cursor()
 
         try:
-            # Determine format for COPY
             if use_jsonl:
                 copy_sql = f'COPY ({copy_query}) TO STDOUT'
                 mime_type = 'application/x-ndjson'
                 suffix = '.jsonl'
             else:
                 copy_sql = (
-                    f'COPY ({copy_query}) TO STDOUT WITH (FORMAT CSV, HEADER false)'
+                    f'COPY ({copy_query}) TO STDOUT WITH '
+                    f"(FORMAT CSV, HEADER false, QUOTE '\"', ESCAPE '\"', FORCE_QUOTE *)"
                 )
                 mime_type = 'text/csv'
                 suffix = '.csv'
@@ -631,19 +686,42 @@ class PostgresToGCSOperator(BaseOperator):
 
         self.log.info(f'Extracting data from Postgres using query: {self.sql}')
 
-        # Handle COPY TO mode for memory-efficient streaming
         if self.use_copy:
             self.log.info('Using COPY TO for memory-efficient streaming')
 
-            # Get column types for schema and type handling
             column_types = self._get_column_types(pg_hook)
             column_names = list(column_types.keys())
 
-            # Detect JSON columns
             json_columns = self._detect_json_columns(pg_hook)
 
-            # Determine if we need JSONL format
             use_jsonl = bool(json_columns) or self.export_format == 'jsonl'
+
+            if (
+                self.auto_switch_format
+                and not use_jsonl
+                and self.export_format == 'csv'
+            ):
+                text_type_columns = {
+                    'text',
+                    'varchar',
+                    'char',
+                    'character',
+                    'character varying',
+                }
+                text_columns = [
+                    col for col, typ in column_types.items() if typ in text_type_columns
+                ]
+                problematic_columns = self._detect_problematic_columns(
+                    pg_hook, text_columns
+                )
+                if problematic_columns:
+                    use_jsonl = True
+                    self.log.info(
+                        f'Detected text columns with problematic characters '
+                        f'(quotes/newlines): {problematic_columns}. '
+                        f'Switching to JSONL format for safer export.'
+                    )
+
             export_format = 'jsonl' if use_jsonl else self.export_format
 
             # Update filename extension if auto-switching to JSONL
@@ -709,7 +787,6 @@ class PostgresToGCSOperator(BaseOperator):
 
             return f'gs://{self.bucket}/{self.filename}'
 
-        # Original pandas-based extraction path
         self.log.info(
             f'Using pandas_chunksize={self.pandas_chunksize} for chunked extraction'
         )
@@ -717,7 +794,31 @@ class PostgresToGCSOperator(BaseOperator):
 
         json_columns = self._detect_json_columns(pg_hook)
         export_format = self.export_format
-        if json_columns and self.export_format == 'parquet':
+
+        if self.auto_switch_format and export_format == 'csv':
+            column_types = self._get_column_types(pg_hook)
+            text_type_columns = {
+                'text',
+                'varchar',
+                'char',
+                'character',
+                'character varying',
+            }
+            text_columns = [
+                col for col, typ in column_types.items() if typ in text_type_columns
+            ]
+            problematic_columns = self._detect_problematic_columns(
+                pg_hook, text_columns
+            )
+            if problematic_columns:
+                export_format = 'jsonl'
+                self.log.info(
+                    f'Detected text columns with problematic characters '
+                    f'(quotes/newlines): {problematic_columns}. '
+                    f'Switching to JSONL format for safer export.'
+                )
+
+        if json_columns and export_format == 'parquet':
             self.log.info(
                 f'Detected JSON columns: {json_columns}. Switching to JSONL format.'
             )

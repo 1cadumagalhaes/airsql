@@ -759,6 +759,24 @@ WHEN NOT MATCHED THEN
             conn.close()
 
     @staticmethod
+    def _table_exists_postgres(hook, table: Table) -> bool:
+        """Check if a PostgreSQL table exists."""
+        if '.' in table.table_name:
+            schema_name, table_name = table.table_name.split('.', 1)
+        else:
+            schema_name = 'public'
+            table_name = table.table_name
+
+        sql = """
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = %s AND table_name = %s
+        )
+        """
+        result = hook.get_first(sql, parameters=[schema_name, table_name])
+        return bool(result[0]) if result else False
+
+    @staticmethod
     def _truncate_postgres_table(df, table: Table) -> None:
         """Truncate Postgres table content, preserving table structure and sequences using PyArrow."""
         from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
@@ -777,19 +795,21 @@ WHEN NOT MATCHED THEN
             table_name = table.table_name
             full_table_name = f'"{table_name}"'
 
-        # Use a transaction to ensure atomicity
         with engine.begin() as conn:
-            # TRUNCATE preserves table structure and resets sequences
-            # RESTART IDENTITY resets any auto-increment sequences
-            truncate_sql = f'TRUNCATE TABLE {full_table_name} RESTART IDENTITY'
-            conn.execute(text(truncate_sql))
+            table_exists = SQLHookManager._table_exists_postgres(hook, table)
 
-            # Insert new data with PyArrow optimization
+            if table_exists:
+                truncate_sql = f'TRUNCATE TABLE {full_table_name} RESTART IDENTITY'
+                conn.execute(text(truncate_sql))
+                if_exists_mode = 'append'
+            else:
+                if_exists_mode = 'replace'
+
             df.to_sql(
                 table_name,
                 conn,
                 schema=schema_name,
-                if_exists='append',
+                if_exists=if_exists_mode,
                 index=False,
                 method='multi',
             )

@@ -60,6 +60,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         cluster_fields: Optional[List[str]] = None,
         dataset_location: str = 'us-central1',
         create_if_empty: bool = False,
+        auto_switch_format: bool = True,
         dry_run: bool = False,
         **kwargs,
     ):
@@ -103,6 +104,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.cluster_fields = cluster_fields or []
         self.dataset_location = dataset_location
         self.create_if_empty = create_if_empty
+        self.auto_switch_format = auto_switch_format
         self.dry_run = dry_run
 
         if self.partition_type not in {'DAY', 'HOUR', 'MONTH', 'YEAR'}:
@@ -213,6 +215,7 @@ class PostgresToBigQueryOperator(BaseOperator):
             pandas_chunksize=self.pandas_chunksize,
             use_copy=self.use_copy,
             use_temp_file=self.use_temp_file,
+            auto_switch_format=self.auto_switch_format,
             dry_run=self.dry_run,
         )
         actual_gcs_path = pg_to_gcs.execute(context)
@@ -251,6 +254,8 @@ class PostgresToBigQueryOperator(BaseOperator):
             if actual_export_format == 'csv':
                 gcs_to_bq_kwargs['source_format'] = 'CSV'
                 gcs_to_bq_kwargs['skip_leading_rows'] = 1
+                gcs_to_bq_kwargs['quote_character'] = '"'
+                gcs_to_bq_kwargs['allow_quoted_newlines'] = True
             elif actual_export_format == 'jsonl':
                 gcs_to_bq_kwargs['source_format'] = 'NEWLINE_DELIMITED_JSON'
                 if actual_schema_filename:
