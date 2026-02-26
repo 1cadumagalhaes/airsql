@@ -176,6 +176,10 @@ class GCSToPostgresOperator(BaseOperator):
 
             if is_integer_target or is_integer_source:
                 if df_copy[col].dtype == 'float64' or df_copy[col].dtype == 'float32':
+                    self.log.info(
+                        f'Coercing column {col} from {df_copy[col].dtype} to int '
+                        f'(pg_type={pg_type}, bq_type={self.source_schema.get(col) if self.source_schema else None})'
+                    )
                     df_copy[col] = df_copy[col].apply(
                         lambda x: int(x) if pd.notna(x) and x is not None else x
                     )
@@ -183,9 +187,21 @@ class GCSToPostgresOperator(BaseOperator):
                     import pyarrow as pa  # noqa: PLC0415
 
                     if pa.types.is_floating(df_copy[col].dtype.pyarrow_dtype):
+                        self.log.info(
+                            f'Coercing column {col} from pyarrow:{df_copy[col].dtype.pyarrow_dtype} to int '
+                            f'(pg_type={pg_type}, bq_type={self.source_schema.get(col) if self.source_schema else None})'
+                        )
                         df_copy[col] = df_copy[col].apply(
                             lambda x: int(x) if pd.notna(x) and x is not None else x
                         )
+                    else:
+                        self.log.debug(
+                            f'Column {col} has pyarrow type {df_copy[col].dtype.pyarrow_dtype}, not floating'
+                        )
+                else:
+                    self.log.debug(
+                        f'Column {col} has dtype {df_copy[col].dtype}, skipping coercion'
+                    )
 
         return df_copy
 
@@ -243,6 +259,10 @@ class GCSToPostgresOperator(BaseOperator):
     def execute(self, context):  # noqa: PLR0912, PLR0914
         import numpy as np  # noqa: PLC0415
         import pandas as pd  # noqa: PLC0415
+
+        from airsql import __version__
+
+        self.log.info(f'airsql version: {__version__}')
 
         start_time = time.time()
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
@@ -328,6 +348,10 @@ class GCSToPostgresOperator(BaseOperator):
         column_types = {rec[0]: rec[1] for rec in columns_from_db_records}
         common_columns = [col for col in df.columns if col in model_columns]
         df_filtered = df[common_columns].replace({np.nan: None})
+
+        self.log.info(f'PostgreSQL column types: {column_types}')
+        if self.source_schema:
+            self.log.info(f'Source schema (BigQuery): {self.source_schema}')
 
         df_filtered = self._coerce_column_types(df_filtered, column_types)
 

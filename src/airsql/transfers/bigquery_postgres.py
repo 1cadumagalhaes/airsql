@@ -118,6 +118,10 @@ class BigQueryToPostgresOperator(BaseOperator):
     def execute(self, context: Context) -> Any:
         """Execute the BigQuery to PostgreSQL transfer."""
 
+        from airsql import __version__
+
+        self.log.info(f'airsql version: {__version__}')
+
         if self.dry_run:
             self.log.info('[DRY RUN] BigQuery to PostgreSQL transfer')
 

@@ -32,7 +32,12 @@ from airsql.decorators import sql
 from airsql.file import File
 from airsql.table import Table
 
-__version__ = '0.1.0'
+try:
+    from importlib.metadata import version  # noqa: PLC0415
+
+    __version__ = version('airsql')
+except Exception:
+    __version__ = 'unknown'
 
 # Core exports
 __all__ = [
