@@ -817,12 +817,28 @@ class PostgresToGCSOperator(BaseOperator):
                     f'(quotes/newlines): {problematic_columns}. '
                     f'Switching to JSONL format for safer export.'
                 )
+                if '.' in self.filename:
+                    base_name = self.filename.rsplit('.', 1)[0]
+                    self.filename = f'{base_name}.jsonl'
+                    self.log.info(f'Updated filename to: {self.filename}')
+                if self.schema_filename and '.' in self.schema_filename:
+                    base_schema = self.schema_filename.rsplit('.schema.json', 1)[0]
+                    self.schema_filename = f'{base_schema}.jsonl.schema.json'
+                self.actual_export_format = 'jsonl'
 
         if json_columns and export_format == 'parquet':
             self.log.info(
                 f'Detected JSON columns: {json_columns}. Switching to JSONL format.'
             )
             export_format = 'jsonl'
+            if '.' in self.filename:
+                base_name = self.filename.rsplit('.', 1)[0]
+                self.filename = f'{base_name}.jsonl'
+                self.log.info(f'Updated filename to: {self.filename}')
+            if self.schema_filename and '.' in self.schema_filename:
+                base_schema = self.schema_filename.rsplit('.schema.json', 1)[0]
+                self.schema_filename = f'{base_schema}.jsonl.schema.json'
+            self.actual_export_format = 'jsonl'
 
         tmp_path: Optional[str] = None
         data_bytes: bytes = b''

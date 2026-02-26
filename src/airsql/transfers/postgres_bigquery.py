@@ -256,6 +256,10 @@ class PostgresToBigQueryOperator(BaseOperator):
                 gcs_to_bq_kwargs['skip_leading_rows'] = 1
                 gcs_to_bq_kwargs['quote_character'] = '"'
                 gcs_to_bq_kwargs['allow_quoted_newlines'] = True
+                if actual_schema_filename:
+                    gcs_to_bq_kwargs['schema_object'] = actual_schema_filename
+                    gcs_to_bq_kwargs['schema_object_bucket'] = self.gcs_bucket
+                    gcs_to_bq_kwargs['autodetect'] = False
             elif actual_export_format == 'jsonl':
                 gcs_to_bq_kwargs['source_format'] = 'NEWLINE_DELIMITED_JSON'
                 if actual_schema_filename:
