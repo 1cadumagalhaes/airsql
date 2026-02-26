@@ -84,6 +84,8 @@ ignore = [
     'PLR0914',
     'C901',
     'PLR0911',
+    'PLC0415',
+    'S608'
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -104,8 +106,17 @@ preview = true
 quote-style = 'single'
 docstring-code-format = true
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+]
+filterwarnings = [
+    "ignore:pandas only supports SQLAlchemy connectable:UserWarning",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "ruff>=0.11.13",
+    "testcontainers[postgres]>=4.14.1",
 ]
