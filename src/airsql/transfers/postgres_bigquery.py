@@ -59,12 +59,12 @@ class PostgresToBigQueryOperator(BaseOperator):
         partition_type: str = PartitionType.DAY,
         cluster_fields: Optional[List[str]] = None,
         dataset_location: str = 'us-central1',
+        create_if_empty: bool = False,
         dry_run: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
-        # Validate export format
         if export_format not in PostgresExportFormat.values():
             raise ValueError(
                 f"Invalid export_format: '{export_format}'. "
@@ -82,7 +82,6 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.pandas_chunksize = pandas_chunksize
         self.use_copy = use_copy
         self.use_temp_file = use_temp_file
-        # Generate temp path with appropriate extension
         if self.export_format == 'parquet':
             file_ext = '.parquet'
         elif self.export_format == 'jsonl':
@@ -103,6 +102,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.partition_type = partition_type.upper()
         self.cluster_fields = cluster_fields or []
         self.dataset_location = dataset_location
+        self.create_if_empty = create_if_empty
         self.dry_run = dry_run
 
         if self.partition_type not in {'DAY', 'HOUR', 'MONTH', 'YEAR'}:

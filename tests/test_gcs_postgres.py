@@ -152,3 +152,54 @@ class TestFixJsonQuoting:
 
         parsed = json.loads(result['data'][0])
         assert parsed == {'outer': {'inner': ['a', 'b']}, 'nums': [1, 2, 3]}
+
+
+class TestTableExists:
+    def test_table_exists_returns_true(self):
+        mock_hook = MagicMock()
+        mock_hook.get_records.return_value = [(True,)]
+
+        result = GCSToPostgresOperator._table_exists(mock_hook, 'public', 'test_table')
+
+        assert result is True
+
+    def test_table_exists_returns_false(self):
+        mock_hook = MagicMock()
+        mock_hook.get_records.return_value = [(False,)]
+
+        result = GCSToPostgresOperator._table_exists(mock_hook, 'public', 'test_table')
+
+        assert result is False
+
+    def test_table_exists_handles_empty_result(self):
+        mock_hook = MagicMock()
+        mock_hook.get_records.return_value = []
+
+        result = GCSToPostgresOperator._table_exists(mock_hook, 'public', 'test_table')
+
+        assert result is False
+
+
+class TestCreateIfEmptyParameter:
+    def test_create_if_empty_default_is_false(self):
+        op = GCSToPostgresOperator(
+            task_id='test_task',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='test.jsonl',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+        )
+        assert op.create_if_empty is False
+
+    def test_create_if_empty_can_be_set(self):
+        op = GCSToPostgresOperator(
+            task_id='test_task',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='test.jsonl',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+            create_if_empty=True,
+        )
+        assert op.create_if_empty is True

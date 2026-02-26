@@ -28,6 +28,7 @@ class GCSToPostgresOperator(BaseOperator):
         conflict_columns=None,
         replace=False,
         grant_table_privileges: bool = True,
+        create_if_empty: bool = False,
         audit_cols_to_exclude=None,
         dry_run: bool = False,
         *args,
@@ -42,6 +43,7 @@ class GCSToPostgresOperator(BaseOperator):
         self.conflict_columns = conflict_columns
         self.replace = replace
         self.grant_table_privileges = grant_table_privileges
+        self.create_if_empty = create_if_empty
         self.dry_run = dry_run
         self.audit_cols_to_exclude = audit_cols_to_exclude or {
             'criado_em',
@@ -150,10 +152,30 @@ class GCSToPostgresOperator(BaseOperator):
         if '.' in self.target_table_name:
             schema, table_name_simple = self.target_table_name.split('.', 1)
         else:
-            schema = 'public'  # Default schema in Postgres
+            schema = 'public'
             table_name_simple = self.target_table_name
 
         table_name_full = f'{schema}.{table_name_simple}'
+
+        # Check if table exists
+        table_exists = GCSToPostgresOperator._table_exists(
+            pg_hook, schema, table_name_simple
+        )
+
+        # Handle empty DataFrame with create_if_empty option
+        if df.empty:
+            if self.create_if_empty and not table_exists:
+                self.log.info(
+                    f'Source is empty and create_if_empty=True. '
+                    f'Creating empty table {table_name_full} with inferred schema.'
+                )
+                if not self.dry_run:
+                    self._create_empty_table_from_schema(
+                        pg_hook, schema, table_name_simple, df
+                    )
+                return table_name_full
+            self.log.info('Source file is empty. No data to load.')
+            return table_name_full
 
         # Get actual column names from the target Postgres table
         self.log.info(f'Fetching schema for Postgres table: {table_name_full}')
@@ -484,3 +506,51 @@ class GCSToPostgresOperator(BaseOperator):
             df[col] = df[col].apply(fix_json_value)
 
         return df
+
+    @staticmethod
+    def _table_exists(pg_hook, schema: str, table_name: str) -> bool:
+        """Check if a table exists in PostgreSQL.
+
+        Args:
+            pg_hook: PostgresHook instance
+            schema: Schema name
+            table_name: Table name
+
+        Returns:
+            True if table exists, False otherwise
+        """
+        sql = """
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = %s AND table_name = %s
+        )
+        """
+        result = pg_hook.get_records(sql, parameters=(schema, table_name))
+        return result[0][0] if result else False
+
+    def _create_empty_table_from_schema(
+        self, pg_hook, schema: str, table_name: str, df
+    ) -> None:
+        """Create an empty table based on DataFrame schema.
+
+        Uses pandas to_sql with if_exists='fail' to create the table structure.
+
+        Args:
+            pg_hook: PostgresHook instance
+            schema: Schema name
+            table_name: Table name
+            df: DataFrame with schema to use (can be empty)
+        """
+        engine = pg_hook.get_sqlalchemy_engine()
+        empty_df = df.iloc[0:0] if len(df) > 0 else df
+        empty_df.to_sql(
+            name=table_name,
+            con=engine,
+            schema=schema,
+            if_exists='fail',
+            index=False,
+        )
+        self.log.info(f'Created empty table {schema}.{table_name}')
+
+        if self.grant_table_privileges:
+            self._grant_table_privileges(pg_hook, schema, table_name)

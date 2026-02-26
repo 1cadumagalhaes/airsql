@@ -59,6 +59,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         source_table_check_sql: Optional[str] = None,
         conflict_columns: Optional[List[str]] = None,
         replace: bool = True,
+        create_if_empty: bool = False,
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
         dry_run: bool = False,
@@ -88,6 +89,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         self.source_table_check_sql = source_table_check_sql
         self.conflict_columns = conflict_columns
         self.replace = replace
+        self.create_if_empty = create_if_empty
         self.emit_asset = emit_asset
         self.cleanup_temp_files = cleanup_temp_files
         self.dry_run = dry_run
@@ -182,6 +184,7 @@ class BigQueryToPostgresOperator(BaseOperator):
             gcp_conn_id=self.gcp_conn_id,
             conflict_columns=self.conflict_columns,
             replace=self.replace,
+            create_if_empty=self.create_if_empty,
             dry_run=self.dry_run,
         )
         gcs_to_pg.execute(context)
