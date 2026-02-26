@@ -55,6 +55,17 @@ class BaseSQLOperator(BaseOperator):
         dynamic_params: Optional[dict] = None,
         **kwargs,
     ):
+        # Backwards-compatibility: some DAGs / decorators may pass a legacy
+        # `dry_run` kwarg. Airflow's BaseOperator rejects unknown kwargs when
+        # apply_defaults runs, so remove it here and store the value as an
+        # instance attribute. Child operators also accept `dry_run_flag`
+        # explicitly; if they do, they'll overwrite `self.is_dry_run`.
+        if 'dry_run' in kwargs:
+            try:
+                self.is_dry_run = bool(kwargs.pop('dry_run'))
+            except Exception:
+                self.is_dry_run = False
+
         super().__init__(**kwargs)
         self.sql = sql
         self.source_conn = source_conn

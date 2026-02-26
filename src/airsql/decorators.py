@@ -178,7 +178,14 @@ class SQLDecorators:
                     op_kwargs['outlets'] = [output_table.as_asset()]
 
                 # Pass through extra template vars to operator for dynamic task naming
-                op_kwargs.update(template_vars)
+                # Map legacy `dry_run` into operator-friendly `dry_run_flag`
+                if 'dry_run' in template_vars:
+                    op_kwargs['dry_run_flag'] = template_vars['dry_run']
+                # Avoid passing unsupported kwargs (like `dry_run`) directly
+                template_filtered = {
+                    k: v for k, v in template_vars.items() if k != 'dry_run'
+                }
+                op_kwargs.update(template_filtered)
 
                 # Validate output_table is provided
                 if output_table is None:
@@ -191,12 +198,14 @@ class SQLDecorators:
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
-                    dry_run=dry_run,
+                    dry_run_flag=dry_run,
                     pre_truncate=pre_truncate,
                     **op_kwargs,
                 )
 
                 return operator
+
+            return wrapper
 
         return decorator
 
@@ -231,14 +240,19 @@ class SQLDecorators:
 
                 op_kwargs: dict[str, Any] = {'outlets': [output_table.as_asset()]}
                 # Pass through extra template vars for dynamic task naming
-                op_kwargs.update(template_vars)
+                if 'dry_run' in template_vars:
+                    op_kwargs['dry_run_flag'] = template_vars['dry_run']
+                template_filtered = {
+                    k: v for k, v in template_vars.items() if k != 'dry_run'
+                }
+                op_kwargs.update(template_filtered)
 
                 operator = SQLAppendOperator(
                     task_id=_get_func_name(func),
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
-                    dry_run=dry_run,
+                    dry_run_flag=dry_run,
                     **op_kwargs,
                 )
 
@@ -325,7 +339,12 @@ class SQLDecorators:
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
                 # Pass through extra template vars for dynamic task naming
-                op_kwargs.update(template_vars)
+                if 'dry_run' in template_vars:
+                    op_kwargs['dry_run_flag'] = template_vars['dry_run']
+                template_filtered = {
+                    k: v for k, v in template_vars.items() if k != 'dry_run'
+                }
+                op_kwargs.update(template_filtered)
 
                 if method == 'truncate':
                     operator = SQLTruncateOperator(
@@ -333,7 +352,7 @@ class SQLDecorators:
                         sql=sql_query,
                         output_table=output_table,
                         source_conn=source_conn,
-                        dry_run=dry_run,
+                        dry_run_flag=dry_run,
                         **op_kwargs,
                     )
                 else:
@@ -342,7 +361,7 @@ class SQLDecorators:
                         sql=sql_query,
                         output_table=output_table,
                         source_conn=source_conn,
-                        dry_run=dry_run,
+                        dry_run_flag=dry_run,
                         **op_kwargs,
                     )
 
@@ -386,14 +405,19 @@ class SQLDecorators:
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
                 # Pass through extra template vars for dynamic task naming
-                op_kwargs.update(template_vars)
+                if 'dry_run' in template_vars:
+                    op_kwargs['dry_run_flag'] = template_vars['dry_run']
+                template_filtered = {
+                    k: v for k, v in template_vars.items() if k != 'dry_run'
+                }
+                op_kwargs.update(template_filtered)
 
                 operator = SQLTruncateOperator(
                     task_id=_get_func_name(func),
                     sql=sql_query,
                     output_table=output_table,
                     source_conn=source_conn,
-                    dry_run=dry_run,
+                    dry_run_flag=dry_run,
                     **op_kwargs,
                 )
 
@@ -441,7 +465,12 @@ class SQLDecorators:
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
                 # Pass through extra template vars for dynamic task naming
-                op_kwargs.update(template_vars)
+                if 'dry_run' in template_vars:
+                    op_kwargs['dry_run_flag'] = template_vars['dry_run']
+                template_filtered = {
+                    k: v for k, v in template_vars.items() if k != 'dry_run'
+                }
+                op_kwargs.update(template_filtered)
 
                 operator = SQLMergeOperator(
                     task_id=_get_func_name(func),
@@ -451,7 +480,7 @@ class SQLDecorators:
                     update_columns=update_columns,
                     source_conn=source_conn,
                     pre_truncate=pre_truncate,
-                    dry_run=dry_run,
+                    dry_run_flag=dry_run,
                     **op_kwargs,
                 )
 
@@ -531,8 +560,14 @@ class SQLDecorators:
                     )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
-                # Pass through extra kwargs for dynamic task naming
-                op_kwargs.update(extra_kwargs)
+                # Map legacy `dry_run` into `dry_run_flag` and avoid passing
+                # unsupported kwargs (like `dry_run`) directly to operators.
+                if 'dry_run' in extra_kwargs:
+                    op_kwargs['dry_run_flag'] = extra_kwargs['dry_run']
+                extra_filtered = {
+                    k: v for k, v in extra_kwargs.items() if k != 'dry_run'
+                }
+                op_kwargs.update(extra_filtered)
 
                 operator = DataFrameLoadOperator(
                     task_id=_get_func_name(func),
@@ -540,7 +575,7 @@ class SQLDecorators:
                     output_table=output_table,
                     timestamp_column=timestamp_column,
                     if_exists=if_exists,
-                    dry_run=dry_run,
+                    dry_run_flag=dry_run,
                     **op_kwargs,
                 )
 
@@ -625,8 +660,14 @@ class SQLDecorators:
                     )
 
                 op_kwargs = {'outlets': [output_table.as_asset()]}
-                # Pass through extra kwargs for dynamic task naming
-                op_kwargs.update(extra_kwargs)
+                # Map legacy `dry_run` into `dry_run_flag` and avoid passing
+                # unsupported kwargs (like `dry_run`) directly to operators.
+                if 'dry_run' in extra_kwargs:
+                    op_kwargs['dry_run_flag'] = extra_kwargs['dry_run']
+                extra_filtered = {
+                    k: v for k, v in extra_kwargs.items() if k != 'dry_run'
+                }
+                op_kwargs.update(extra_filtered)
 
                 operator = DataFrameMergeOperator(
                     task_id=_get_func_name(func),
@@ -635,7 +676,7 @@ class SQLDecorators:
                     conflict_columns=conflict_columns,
                     update_columns=update_columns,
                     timestamp_column=timestamp_column,
-                    dry_run=dry_run,
+                    dry_run_flag=dry_run,
                     **op_kwargs,
                 )
 
@@ -824,7 +865,7 @@ class SQLDecorators:
                     conflict_columns=conflict_columns,
                     update_columns=update_columns,
                     timestamp_column=timestamp_column,
-                    dry_run=dry_run,
+                    dry_run_flag=dry_run,
                     outlets=[output_table.as_asset()],
                 )
 
@@ -912,7 +953,7 @@ class SQLDecorators:
                     output_table=output_table,
                     timestamp_column=timestamp_column,
                     if_exists=if_exists,
-                    dry_run=dry_run,
+                    dry_run_flag=dry_run,
                     outlets=[output_table.as_asset()],
                 )
 
