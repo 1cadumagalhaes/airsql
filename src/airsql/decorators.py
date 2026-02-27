@@ -8,8 +8,8 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
-from airflow.sdk import get_current_context, task
 from airflow.models import BaseOperator
+from airflow.sdk import get_current_context, task
 from jinja2 import Environment, select_autoescape
 
 from airsql.file import File

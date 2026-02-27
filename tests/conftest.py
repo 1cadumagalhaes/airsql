@@ -72,6 +72,9 @@ class _PostgresHook(_BaseHook):
     def get_pandas_df(self, sql: str, **kwargs: Any) -> pd.DataFrame:
         return pd.DataFrame({'id': [1, 2], 'value': ['a', 'b']})
 
+    def get_records(self, sql: str, parameters=None) -> list:
+        return []
+
 
 class _BigQueryHook(_BaseHook):
     def __init__(

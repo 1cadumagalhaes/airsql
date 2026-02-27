@@ -5,8 +5,8 @@ Hook manager for handling different database connections and operations.
 import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
-import pandas as pd
 
+import pandas as pd
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import get_current_context
 from airflow.sdk.bases.hook import BaseHook
@@ -785,7 +785,9 @@ WHEN NOT MATCHED THEN
                 columns=psycopg_sql.SQL(', ').join([
                     psycopg_sql.Identifier(col) for col in common_columns
                 ]),
-                placeholders=', '.join(['%s'] * len(common_columns)),
+                placeholders=psycopg_sql.SQL(', ').join([
+                    psycopg_sql.SQL('%s') for _ in common_columns
+                ]),
             )
 
             conflict_sql_part = psycopg_sql.SQL(
