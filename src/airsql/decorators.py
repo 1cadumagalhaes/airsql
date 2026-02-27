@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from airflow.sdk import get_current_context, task
+from airflow.models import BaseOperator
 from jinja2 import Environment, select_autoescape
 
 from airsql.file import File
@@ -150,7 +151,7 @@ class SQLDecorators:
         dry_run: bool = False,
         pre_truncate: bool = False,
         **template_vars: Any,
-    ) -> Callable[[Any], Any]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., BaseOperator]]:
         """Decorator for SQL queries.
 
         Args:
@@ -166,7 +167,7 @@ class SQLDecorators:
 
         def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> BaseOperator:
                 from airsql.operators import SQLQueryOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -216,7 +217,7 @@ class SQLDecorators:
         sql_file: Optional[str] = None,
         dry_run: bool = False,
         **template_vars: Any,
-    ) -> Callable[[Any], Any]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., BaseOperator]]:
         """Decorator for SQL queries that append data to a destination table.
 
         Args:
@@ -231,7 +232,7 @@ class SQLDecorators:
 
         def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> BaseOperator:
                 from airsql.operators import SQLAppendOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -267,7 +268,7 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         **template_vars: Any,
-    ) -> Callable:
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Decorator for SQL queries that return a pandas DataFrame.
 
@@ -311,7 +312,7 @@ class SQLDecorators:
         method: str = 'replace',
         dry_run: bool = False,
         **template_vars: Any,
-    ) -> Callable:
+    ) -> Callable[[Callable[..., Any]], Callable[..., BaseOperator]]:
         """Decorator for SQL operations that replace table content.
 
         Args:
@@ -378,7 +379,7 @@ class SQLDecorators:
         sql_file: Optional[str] = None,
         dry_run: bool = False,
         **template_vars: Any,
-    ) -> Callable:
+    ) -> Callable[[Callable[..., Any]], Callable[..., BaseOperator]]:
         """Decorator for SQL operations that truncate table content and reload.
 
         Truncates the table while preserving table structure and resetting
@@ -396,7 +397,7 @@ class SQLDecorators:
 
         def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> BaseOperator:
                 from airsql.operators import SQLTruncateOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -437,7 +438,7 @@ class SQLDecorators:
         pre_truncate: bool = False,
         dry_run: bool = False,
         **template_vars: Any,
-    ) -> Callable:
+    ) -> Callable[[Callable[..., Any]], Callable[..., BaseOperator]]:
         """Decorator for SQL operations that merge/upsert into tables.
 
         Args:
@@ -456,7 +457,7 @@ class SQLDecorators:
 
         def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> BaseOperator:
                 from airsql.operators import SQLMergeOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -498,7 +499,7 @@ class SQLDecorators:
         dataframe=None,
         dry_run: bool = False,
         **extra_kwargs,
-    ) -> Callable:
+    ) -> Callable[[Callable[..., Any]], Callable[..., BaseOperator]]:
         """
         Decorator for functions that return a DataFrame to be loaded into a table,
         or for directly loading a provided DataFrame.
@@ -594,7 +595,7 @@ class SQLDecorators:
         dataframe=None,
         dry_run: bool = False,
         **extra_kwargs,
-    ) -> Callable:
+    ) -> Callable[[Callable[..., Any]], Callable[..., BaseOperator]]:
         """
         Decorator for functions that return a DataFrame to be merged/upserted
         into a table, or for directly merging a provided DataFrame.
@@ -642,7 +643,7 @@ class SQLDecorators:
 
         def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> BaseOperator:
                 import pandas as pd  # noqa: PLC0415
 
                 from airsql.operators import DataFrameMergeOperator  # noqa: PLC0415
@@ -692,7 +693,7 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         **template_vars: Any,
-    ) -> Callable:
+    ) -> Callable[[Any], BaseOperator]:
         """Decorator for SQL data quality checks (for dbt tests).
 
         Uses Airflow's native SQLCheckOperator which expects SQL that returns a
@@ -718,7 +719,7 @@ class SQLDecorators:
 
         def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> BaseOperator:
                 from airsql.operators import SQLCheckOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(
@@ -743,7 +744,7 @@ class SQLDecorators:
         source_conn: Optional[str] = None,
         sql_file: Optional[str] = None,
         **template_vars: Any,
-    ) -> Callable:
+    ) -> Callable[[Any], BaseOperator]:
         """
         Decorator for DDL operations like CREATE VIEW, CREATE TABLE AS.
 
@@ -761,7 +762,7 @@ class SQLDecorators:
 
         def decorator(func: Any) -> Any:
             @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            def wrapper(*args: Any, **kwargs: Any) -> BaseOperator:
                 from airsql.operators import SQLQueryOperator  # noqa: PLC0415
 
                 sql_query = self._process_sql_input(

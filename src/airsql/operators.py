@@ -55,6 +55,19 @@ class BaseSQLOperator(BaseOperator):
         dynamic_params: Optional[dict] = None,
         **kwargs,
     ):
+        """Initialize the base SQL operator.
+
+        Args:
+            sql: SQL template or rendered SQL string associated with the operator.
+            source_conn: Optional connection id of the source database.
+            dynamic_params: Optional mapping used for dynamic task naming and mapping.
+            **kwargs: Additional keyword arguments passed to BaseOperator.
+
+        Notes:
+            Child operators commonly accept additional flags such as
+            ``dry_run_flag`` or ``pre_truncate``. This constructor stores
+            parameters on the instance for use by operators and templates.
+        """
         # Backwards-compatibility: some DAGs / decorators may pass a legacy
         # `dry_run` kwarg. Airflow's BaseOperator rejects unknown kwargs when
         # apply_defaults runs, so remove it here and store the value as an
@@ -87,19 +100,36 @@ class SQLQueryOperator(BaseSQLOperator):
     def __init__(
         self,
         sql: str,
-        output_table: Table,
+        output_table: Optional[Table] = None,
         source_conn: Optional[str] = None,
         dry_run_flag: bool = False,
         pre_truncate: bool = False,
         **kwargs,
     ):
+        """Create an operator that executes a SQL query and writes results.
+
+        Args:
+            sql: SQL string to execute.
+            output_table: Target table reference where results will be written.
+            source_conn: Connection ID to execute the SQL against.
+            dry_run_flag: If True, simulate the operation without writing data.
+            pre_truncate: If True, truncate the destination before writing.
+            **kwargs: Extra keyword args forwarded to BaseSQLOperator.
+        """
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
         self.is_dry_run = dry_run_flag
         self.pre_truncate = pre_truncate
 
     def execute(self, context: Context) -> str:
-        """Execute the SQL query and write to the output table."""
+        """Execute the SQL query and write to the output table.
+
+        Args:
+            context: Airflow execution context passed by the scheduler.
+
+        Returns:
+            The string representation of the output table.
+        """
         start_time = time.time()
         self.log.info(f'Executing SQL query to write to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
@@ -153,12 +183,28 @@ class SQLAppendOperator(BaseSQLOperator):
         dry_run_flag: bool = False,
         **kwargs,
     ):
+        """Create an operator that executes a SQL query and appends results.
+
+        Args:
+            sql: SQL string to execute.
+            output_table: Target table reference where results will be appended.
+            source_conn: Connection ID to execute the SQL against.
+            dry_run_flag: If True, simulate without writing data.
+            **kwargs: Extra keyword args forwarded to BaseSQLOperator.
+        """
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
         self.is_dry_run = dry_run_flag
 
     def execute(self, context: Context) -> str:
-        """Execute the SQL query and append to the output table."""
+        """Execute the SQL query and append to the output table.
+
+        Args:
+            context: Airflow execution context passed by the scheduler.
+
+        Returns:
+            The string representation of the output table.
+        """
         start_time = time.time()
         self.log.info(f'Executing SQL query to append to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
@@ -205,8 +251,15 @@ class SQLAppendOperator(BaseSQLOperator):
 class SQLDataFrameOperator(BaseSQLOperator):
     """Operator for SQL queries that return a pandas DataFrame."""
 
-    def execute(self, context: Context):
-        """Execute the SQL query and return a DataFrame."""
+    def execute(self, context: Context) -> pd.DataFrame:
+        """Execute the SQL query and return a pandas DataFrame.
+
+        Args:
+            context: Airflow execution context passed by the scheduler.
+
+        Returns:
+            A pandas DataFrame with the query results.
+        """
         start_time = time.time()
         self.log.info('Executing SQL query to return DataFrame')
         self.log.debug(f'SQL Query: {self.sql}')
@@ -254,7 +307,14 @@ class SQLReplaceOperator(BaseSQLOperator):
         self.is_dry_run = dry_run_flag
 
     def execute(self, context: Context) -> str:
-        """Execute the SQL query and replace the output table."""
+        """Execute the SQL query and replace the output table.
+
+        Args:
+            context: Airflow execution context passed by the scheduler.
+
+        Returns:
+            The string representation of the output table.
+        """
         start_time = time.time()
         self.log.info(f'Executing SQL query to replace {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
@@ -310,7 +370,14 @@ class SQLTruncateOperator(BaseSQLOperator):
         self.is_dry_run = dry_run_flag
 
     def execute(self, context: Context) -> str:
-        """Execute the SQL query and truncate/reload the output table."""
+        """Execute the SQL query and truncate/reload the output table.
+
+        Args:
+            context: Airflow execution context passed by the scheduler.
+
+        Returns:
+            The string representation of the output table.
+        """
         start_time = time.time()
         self.log.info(f'Executing SQL query to truncate and reload {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
@@ -371,6 +438,18 @@ class SQLMergeOperator(BaseSQLOperator):
         dry_run_flag: bool = False,
         **kwargs,
     ):
+        """Create an operator that runs a SQL query and merges results.
+
+        Args:
+            sql: SQL string to execute.
+            output_table: Target table reference for the merge.
+            conflict_columns: Columns used to identify conflicts (ON clause).
+            update_columns: Columns to update on conflict (optional).
+            source_conn: Connection ID for executing the SQL.
+            pre_truncate: If True, truncate destination before merge.
+            dry_run_flag: If True, simulate without applying changes.
+            **kwargs: Extra keyword args forwarded to BaseSQLOperator.
+        """
         super().__init__(sql=sql, source_conn=source_conn, **kwargs)
         self.output_table = output_table
         self.conflict_columns = conflict_columns
@@ -379,7 +458,14 @@ class SQLMergeOperator(BaseSQLOperator):
         self.is_dry_run = dry_run_flag
 
     def execute(self, context: Context) -> Any:
-        """Execute the SQL query and merge into the output table."""
+        """Execute the SQL query and merge into the output table.
+
+        Args:
+            context: Airflow execution context passed by the scheduler.
+
+        Returns:
+            The string representation of the output table.
+        """
         start_time = time.time()
         self.log.info(f'Executing SQL query to merge into {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
@@ -455,6 +541,16 @@ class DataFrameLoadOperator(BaseOperator):
         dry_run_flag: bool = False,
         **kwargs,
     ):
+        """Create an operator that loads a pandas DataFrame into a table.
+
+        Args:
+            dataframe: The pandas DataFrame to load.
+            output_table: Target table reference where data will be written.
+            timestamp_column: Optional column to populate with current timestamp.
+            if_exists: Behavior when table exists ('append', 'replace', 'fail', 'truncate').
+            dry_run_flag: If True, simulate without writing data.
+            **kwargs: Extra keyword args forwarded to BaseOperator (used for task mapping).
+        """
         super().__init__(**kwargs)
         self.dataframe = dataframe
         self.output_table = output_table
@@ -469,7 +565,11 @@ class DataFrameLoadOperator(BaseOperator):
                 setattr(self, key, value)
 
     def execute(self, context: Context) -> None:
-        """Execute the DataFrame load operation."""
+        """Execute the DataFrame load operation.
+
+        Args:
+            context: Airflow execution context passed by the scheduler.
+        """
         start_time = time.time()
         self.log.info(
             f'Loading DataFrame with {len(self.dataframe)} rows to {self.output_table}'
@@ -525,6 +625,18 @@ class DataFrameMergeOperator(BaseOperator):
         dry_run_flag: bool = False,
         **kwargs,
     ):
+        """Create an operator that merges a pandas DataFrame into a table.
+
+        Args:
+            dataframe: The pandas DataFrame to merge.
+            output_table: Target table reference for the merge.
+            conflict_columns: Columns used to identify conflicting rows.
+            update_columns: Columns to update on conflict (optional).
+            timestamp_column: Optional name of the timestamp column to populate.
+            pre_truncate: If True, truncate the destination before merging.
+            dry_run_flag: If True, simulate without applying changes.
+            **kwargs: Extra keyword args forwarded to BaseOperator (used for task mapping).
+        """
         super().__init__(**kwargs)
         self.dataframe = dataframe
         self.output_table = output_table
@@ -541,7 +653,11 @@ class DataFrameMergeOperator(BaseOperator):
                 setattr(self, key, value)
 
     def execute(self, context: Context) -> None:
-        """Execute the DataFrame merge operation."""
+        """Execute the DataFrame merge operation.
+
+        Args:
+            context: Airflow execution context passed by the scheduler.
+        """
         start_time = time.time()
         self.log.info(
             f'Merging DataFrame with {len(self.dataframe)} rows into {self.output_table}'

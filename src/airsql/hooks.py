@@ -5,6 +5,7 @@ Hook manager for handling different database connections and operations.
 import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
+import pandas as pd
 
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import get_current_context
@@ -21,7 +22,14 @@ DEFAULT_BIGQUERY_LOCATION = 'us-central1'
 
 @lru_cache(maxsize=128)
 def _get_connection_type(conn_id: str) -> str:
-    """Cached connection type lookup to avoid repeated DB queries."""
+    """Cached connection type lookup to avoid repeated DB queries.
+
+    Args:
+        conn_id: Airflow connection id to inspect.
+
+    Returns:
+        The normalized connection type string (lowercase) or 'unknown' on error.
+    """
     try:
         conn = BaseHook.get_connection(conn_id)
         return conn.conn_type.lower() if conn.conn_type else 'unknown'
@@ -34,7 +42,20 @@ class SQLHookManager:
 
     @staticmethod
     def get_hook(conn_id: str) -> Any:
-        """Get the appropriate hook for a connection ID."""
+        """Get the appropriate Airflow provider hook for a connection id.
+
+        This helper inspects the Airflow connection type and returns a
+        provider-specific hook instance (BigQueryHook or PostgresHook).
+
+        Args:
+            conn_id: Airflow connection id configured in the Airflow UI.
+
+        Returns:
+            An instantiated hook object appropriate for the connection.
+
+        Raises:
+            ValueError: If the connection cannot be retrieved or the type is unsupported.
+        """
         try:
             connection = BaseHook.get_connection(conn_id)
         except Exception as e:
@@ -66,7 +87,18 @@ class SQLHookManager:
             )
 
     def get_table_schema(self, table: Table) -> List[Dict[str, Any]]:
-        """Get the schema of a table."""
+        """Return the schema of a table as a list of column descriptors.
+
+        Args:
+            table: Table reference describing the target table.
+
+        Returns:
+            A list of dictionaries with keys such as 'name', 'type', and 'nullable'
+            describing each column in the target table.
+
+        Raises:
+            ValueError: If the table's backend is unsupported.
+        """
         hook = self.get_hook(table.conn_id)
 
         if table.is_bigquery:
@@ -77,7 +109,7 @@ class SQLHookManager:
             raise ValueError(f'Unsupported database type for table: {table}')
 
     def _add_automatic_timestamps(
-        self, df, table: Table, timestamp_column: Optional[str] = None
+        self, df: 'pd.DataFrame', table: Table, timestamp_column: Optional[str] = None
     ):
         """Add automatic timestamp columns to
         DataFrame if they exist in target table."""
@@ -117,7 +149,7 @@ class SQLHookManager:
 
     def write_dataframe_to_table(
         self,
-        df,
+        df: 'pd.DataFrame',
         table: Table,
         if_exists: str = 'append',
         timestamp_column: Optional[str] = None,
@@ -167,7 +199,7 @@ class SQLHookManager:
 
     def replace_table_content(
         self,
-        df,
+        df: 'pd.DataFrame',
         table: Table,
         timestamp_column: Optional[str] = None,
         dataset_location: Optional[str] = None,
@@ -191,22 +223,37 @@ class SQLHookManager:
 
     def merge_dataframe_to_table(
         self,
-        df,
+        df: 'pd.DataFrame',
         table: Table,
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
         timestamp_column: Optional[str] = None,
         dataset_location: Optional[str] = None,
     ) -> None:
-        """Merge/upsert DataFrame data into a table.
+        """Merge/upsert a pandas DataFrame into the target table.
+
+        This is the public entry point for DataFrame merges. Behavior differs
+        by backend:
+
+        - Postgres: dispatches to ``_merge_postgres_table`` which uses
+          ``INSERT ... ON CONFLICT (...) DO UPDATE`` with batched inserts.
+        - BigQuery: dispatches to ``_merge_bigquery_table`` which uploads the
+          DataFrame into a temporary table and issues a MERGE statement.
 
         Args:
-            df: DataFrame to merge
-            table: Target table reference
-            conflict_columns: Columns to use for conflict detection
-            update_columns: Columns to update on conflict (defaults to all except conflict columns)
-            timestamp_column: Column to set automatic timestamp
-            dataset_location: BigQuery dataset location/region (defaults to table.location or 'us-central1')
+            df: DataFrame to merge.
+            table: Target table reference.
+            conflict_columns: Columns to use for conflict detection.
+            update_columns: Columns to update on conflict. If ``None``, all
+                non-conflict and non-audit columns are updated (Postgres) or
+                all non-conflict columns (BigQuery).
+            timestamp_column: Optional column name to populate with current
+                timestamp if present in the destination schema.
+            dataset_location: Optional BigQuery dataset location override.
+
+        Raises:
+            ValueError: If backend is unsupported or if provided update columns
+                are missing from the DataFrame or target table.
         """
         logger = logging.getLogger(__name__)
         logger.info(f'Merging DataFrame with {len(df)} rows into {table.table_name}')
@@ -378,7 +425,7 @@ class SQLHookManager:
 
     @staticmethod
     def _write_to_bigquery(
-        df,
+        df: 'pd.DataFrame',
         table: Table,
         if_exists: str = 'append',
         dataset_location: Optional[str] = None,
@@ -443,7 +490,13 @@ class SQLHookManager:
 
     @staticmethod
     def _write_to_postgres(df, table: Table, if_exists: str = 'append') -> None:
-        """Write DataFrame to Postgres table using PyArrow for optimization."""
+        """Write DataFrame to Postgres table using SQLAlchemy engine and pandas.
+
+        Args:
+            df: DataFrame to write.
+            table: Target table reference.
+            if_exists: Behavior if the table exists ('append', 'replace', 'fail').
+        """
         from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
             PostgresHook,  # noqa: PLC0415
         )
@@ -466,7 +519,7 @@ class SQLHookManager:
 
     @staticmethod
     def _replace_bigquery_table(
-        df,
+        df: 'pd.DataFrame',
         table: Table,
         dataset_location: Optional[str] = None,
     ) -> None:
@@ -518,8 +571,13 @@ class SQLHookManager:
         job.result()
 
     @staticmethod
-    def _replace_postgres_table(df, table: Table) -> None:
-        """Replace Postgres table content using PyArrow for optimization."""
+    def _replace_postgres_table(df: 'pd.DataFrame', table: Table) -> None:
+        """Replace Postgres table content using pandas.to_sql with replace mode.
+
+        Args:
+            df: DataFrame to write.
+            table: Target table reference.
+        """
         from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
             PostgresHook,  # noqa: PLC0415
         )
@@ -543,7 +601,7 @@ class SQLHookManager:
 
     @staticmethod
     def _merge_bigquery_table(  # noqa: PLR0914
-        df,
+        df: 'pd.DataFrame',
         table: Table,
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
@@ -633,12 +691,29 @@ WHEN NOT MATCHED THEN
 
     def _merge_postgres_table(  # noqa: PLR0914
         self,
-        df,
+        df: 'pd.DataFrame',
         table: Table,
         conflict_columns: List[str],
         update_columns: Optional[List[str]] = None,
     ) -> None:
-        """Merge DataFrame into Postgres table using ON CONFLICT."""
+        """Merge a pandas DataFrame into a Postgres table using ON CONFLICT.
+
+        This method performs the following steps:
+        1. Reads the target table schema and filters DataFrame to common columns.
+        2. Replaces pandas NA/np.nan with None for correct NULL handling.
+        3. Constructs an INSERT statement with placeholders and an ON CONFLICT
+           clause to perform an upsert using EXCLUDED values.
+        4. Executes the inserts in batches. If psycopg3 is available it will
+           use cursor.executemany, otherwise it uses psycopg2.extras.execute_values
+           for performance.
+
+        Notes:
+            - "update_columns" validation ensures the specified columns exist in
+              both the DataFrame and the target table; a ValueError is raised
+              otherwise.
+            - Audit columns (created_at/updated_at equivalents) are excluded by
+              default from updates unless explicitly provided in update_columns.
+        """
         from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
             USE_PSYCOPG3,
             PostgresHook,  # noqa: PLC0415
@@ -777,7 +852,7 @@ WHEN NOT MATCHED THEN
         return bool(result[0]) if result else False
 
     @staticmethod
-    def _truncate_postgres_table(df, table: Table) -> None:
+    def _truncate_postgres_table(df: 'pd.DataFrame', table: Table) -> None:
         """Truncate Postgres table content, preserving table structure and sequences using PyArrow."""
         from airflow.providers.postgres.hooks.postgres import (  # noqa: PLC0415
             PostgresHook,  # noqa: PLC0415
