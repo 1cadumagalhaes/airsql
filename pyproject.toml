@@ -116,7 +116,7 @@ filterwarnings = [
 
 [dependency-groups]
 dev = [
-    "mkdocstrings>=1.0.3",
+    "mkdocstrings-python>=2.0.3",
     "pygments>=2.19.2",
     "pymdown-extensions>=10.21",
     "pytest>=9.0.2",
