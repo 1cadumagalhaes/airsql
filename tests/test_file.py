@@ -10,7 +10,9 @@ class TestFile:
     def test_render_with_template_source_fix(self) -> None:
         """Test that File.render() works correctly without using template.source."""
         # Create a temporary SQL file with Jinja templating
-        with tempfile.NamedTemporaryFile(encoding='utf-8', mode='w', suffix='.sql', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            encoding='utf-8', mode='w', suffix='.sql', delete=False
+        ) as f:
             f.write('SELECT * FROM {{ table_name }} WHERE id = {{ id }}')
             temp_file_path = f.name
 
@@ -30,7 +32,9 @@ class TestFile:
     def test_render_without_context(self) -> None:
         """Test that File.render() works without context variables."""
         # Create a temporary SQL file without Jinja templating
-        with tempfile.NamedTemporaryFile(encoding='utf-8', mode='w', suffix='.sql', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            encoding='utf-8', mode='w', suffix='.sql', delete=False
+        ) as f:
             f.write('SELECT * FROM users WHERE id = 123')
             temp_file_path = f.name
 
@@ -50,7 +54,9 @@ class TestFile:
     def test_render_with_variables(self) -> None:
         """Test that File.render() works with variables provided at initialization."""
         # Create a temporary SQL file with Jinja templating
-        with tempfile.NamedTemporaryFile(encoding='utf-8', mode='w', suffix='.sql', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            encoding='utf-8', mode='w', suffix='.sql', delete=False
+        ) as f:
             f.write('SELECT * FROM {{ table_name }} WHERE id = {{ id }}')
             temp_file_path = f.name
 
