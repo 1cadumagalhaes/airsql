@@ -31,6 +31,9 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "psycopg[binary,pool]>=3.1.0",
     "db-dtypes>=1.4.4",
+    "mkdocstrings-python>=2.0.3",
+    "mkdocs-material>=9.7.3",
+    "zensical>=0.0.24",
 ]
 
 [project.urls]
@@ -116,7 +119,10 @@ filterwarnings = [
 
 [dependency-groups]
 dev = [
+    "pygments>=2.19.2",
+    "pymdown-extensions>=10.21",
     "pytest>=9.0.2",
     "ruff>=0.11.13",
     "testcontainers[postgres]>=4.14.1",
+    "zensical>=0.0.24",
 ]
