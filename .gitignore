@@ -11,3 +11,15 @@ wheels/
 uv.lock
 .ruff_cache
 .DS_Store
+
+# Zensical build output
+site/
+
+# IDE/Editor
+.opencode/
+
+# Python cache
+.cache/
+
+# Testing
+.pytest_cache/
