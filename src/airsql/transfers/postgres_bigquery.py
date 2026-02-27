@@ -22,13 +22,42 @@ _PARTIAL_TABLE_PARTS = 2  # dataset.table
 
 
 class PostgresToBigQueryOperator(BaseOperator):
-    """
-    Enhanced operator that transfers data from PostgreSQL to BigQuery with:
-    - Table existence and data validation using sensors
-    - Temporary GCS staging with automatic cleanup
-    - Asset emission for lineage tracking
+    """Transfer data from PostgreSQL to BigQuery via GCS staging.
 
-    This operator combines PostgreSQL→GCS→BigQuery transfer with proper validation.
+    This operator extracts data from PostgreSQL, uploads to a temporary GCS
+    location, then loads into BigQuery. Includes source validation, automatic
+    schema detection, and cleanup.
+
+    Args:
+        postgres_conn_id: PostgreSQL connection ID.
+        sql: SQL query to extract data. Mutually exclusive with
+            source_project_dataset_table.
+        source_project_dataset_table: Source table (postgres.schema.table).
+            Used if sql is not provided.
+        destination_project_dataset_table: BigQuery destination table
+            (project.dataset.table or dataset.table).
+        gcp_conn_id: GCP connection ID. Defaults to 'google_cloud_default'.
+        gcs_bucket: GCS bucket for temporary staging.
+        gcs_temp_path: GCS path for temp files. Auto-generated if not provided.
+        export_format: Export format: 'csv' or 'jsonl'. Defaults to 'csv'.
+        schema_filename: GCS path for BigQuery schema JSON file. Optional.
+        pandas_chunksize: Rows per chunk for large exports. Defaults to 100000.
+        use_copy: If True, use PostgreSQL COPY for streaming. Defaults to False.
+        use_temp_file: If True, use temporary file instead of streaming.
+        check_source_exists: If True, validate source has data before transfer.
+        source_table_check_sql: Custom SQL for source validation. Optional.
+        write_disposition: BigQuery write disposition. Defaults to 'WRITE_TRUNCATE'.
+        create_disposition: BigQuery create disposition. Defaults to 'CREATE_IF_NEEDED'.
+        emit_asset: If True, emit Airflow asset for lineage. Defaults to True.
+        cleanup_temp_files: If True, delete GCS temp files after load. Defaults to True.
+        partition_by: BigQuery partition column. Optional.
+        partition_type: Partition type: 'DAY', 'HOUR', 'MONTH', 'YEAR'.
+            Defaults to 'DAY'.
+        cluster_fields: BigQuery clustering columns. Optional.
+        dataset_location: BigQuery dataset location. Defaults to 'us-central1'.
+        create_if_empty: If True, create empty table when source is empty.
+        auto_switch_format: If True, switch to JSONL for JSON columns.
+        dry_run: If True, simulate the operation without writing data.
     """
 
     template_fields = ['sql', 'destination_table', 'gcs_temp_path']

@@ -228,37 +228,39 @@ def _pa_table_to_bq_schema(
 
 
 class PostgresToGCSOperator(BaseOperator):
-    """
-    Copies data from Postgres to Google Cloud Storage in CSV or Parquet format.
+    """Operator to copy data from PostgreSQL to Google Cloud Storage.
 
-    :param postgres_conn_id: Reference to a specific Postgres hook.
-    :type postgres_conn_id: str
-    :param sql: The SQL query to be executed.
-    :type sql: str
-    :param bucket: The GCS bucket to upload to.
-    :type bucket: str
-    :param filename: The GCS filename to upload to (including a folder).
-    :type filename: str
-    :param gcp_conn_id: (Optional) The connection ID used to connect to Google Cloud.
-    :type gcp_conn_id: str
-    :param export_format: (Optional) The format to export the data to.
-        Supported formats are 'csv' and 'parquet'. Default is 'parquet'.
-    :type export_format: str
-    :param schema_filename: (Optional) If set, a GCS file with the schema
-        will be uploaded.
-    :type schema_filename: str
-    :param pandas_chunksize: (Optional) The number of rows to include in each
-        chunk processed by pandas.
-    :type pandas_chunksize: int
-    :param csv_kwargs: (Optional) Arguments to pass to `pandas.DataFrame.to_csv()`.
-    :type csv_kwargs: dict
-    :param parquet_kwargs: (Optional) Arguments to pass to `DataFrame.to_parquet()`.
-    :type parquet_kwargs: dict
-    :param auto_switch_format: (Optional) If True, detect problematic characters
-        (quotes, newlines) in text columns and automatically switch to JSONL format.
-        If False, use requested format with proper CSV quoting options.
-        Default is True.
-    :type auto_switch_format: bool
+    Exports data from PostgreSQL using SQL queries and uploads the results
+    to GCS in CSV, Parquet, or JSONL format. Supports automatic format
+    switching when problematic characters are detected.
+
+    Args:
+        postgres_conn_id: Reference to a specific Postgres hook.
+        sql: The SQL query to be executed.
+        bucket: The GCS bucket to upload to.
+        filename: The GCS filename to upload to (including a folder).
+        gcp_conn_id: The connection ID used to connect to Google Cloud.
+            Defaults to 'google_cloud_default'.
+        export_format: The format to export the data to. Supported formats
+            are 'csv', 'parquet', and 'jsonl'. Defaults to 'csv'.
+        schema_filename: If set, a GCS file with the schema will be uploaded.
+        pandas_chunksize: The number of rows to include in each chunk
+            processed by pandas.
+        use_copy: If True, use PostgreSQL COPY command for streaming.
+        use_temp_file: If True, use a temporary file instead of streaming.
+        csv_kwargs: Arguments to pass to pandas.DataFrame.to_csv().
+        parquet_kwargs: Arguments to pass to DataFrame.to_parquet().
+        schema_detection_mode: Mode for detecting column types.
+            Defaults to 'postgres'.
+        sampling_size: Number of rows to sample for JSON detection.
+            Defaults to 100.
+        sampling_threshold: Threshold for JSON column detection.
+            Defaults to 0.9.
+        auto_switch_format: If True, detect problematic characters (quotes,
+            newlines) in text columns and automatically switch to JSONL format.
+            If False, use requested format with proper CSV quoting options.
+            Defaults to True.
+        dry_run: If True, simulate the operation without writing data.
     """
 
     template_fields: Sequence[str] = (

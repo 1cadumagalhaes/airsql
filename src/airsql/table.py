@@ -15,26 +15,21 @@ class Table(BaseModel):
 
     This class is JSON serializable for use with Airflow XCom and TaskFlow API.
 
-    Examples:
-        Table(conn_id="postgres_conn", table_name="analytics.user_summary")
-        Table(
-            conn_id="bigquery_conn",
-            table_name="analytics.user_events",
-            project="data-warehouse-proj",
-            partition_by="event_date",
-            cluster_by=["user_id", "event_type"],
-            location="US"
-        )
-        Table(
-            conn_id="bigquery_conn",
-            table_name="analytics.events_*",
-            date_range=("20250501", "20250529")
-        )
-        Table(
-            conn_id="bigquery_conn",
-            table_name="temp.analysis_{{run_id}}",
-            temporary=True
-        )
+    Args:
+        conn_id: Airflow connection ID to use for operations.
+        table_name: Fully qualified table name (schema.table for Postgres,
+            dataset.table for BigQuery).
+        project: Optional BigQuery project override.
+        schema_fields: Optional explicit schema description for BigQuery writes.
+        partition_by: BigQuery partition column name.
+        cluster_by: BigQuery clustering columns.
+        location: BigQuery dataset location/region.
+        temporary: If True, operators will attempt to drop this table after use.
+        temp_schema: Optional schema for Postgres temporary tables.
+        date_range: Optional tuple for sharded table ranges.
+        table_type: BigQuery table type (e.g., EXTERNAL).
+        dataset: Optional dataset/schema override for certain databases.
+        extra_config: Any additional provider-specific configuration.
     """
 
     conn_id: str = Field(..., description='Airflow connection ID')

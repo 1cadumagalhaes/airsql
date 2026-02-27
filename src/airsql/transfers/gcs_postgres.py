@@ -34,6 +34,30 @@ def _is_psycopg2_connection(conn):
 
 
 class GCSToPostgresOperator(BaseOperator):
+    """Operator to load data from Google Cloud Storage to PostgreSQL.
+
+    Downloads files from GCS and loads them into PostgreSQL tables. Supports
+    CSV, JSONL, Parquet, and Avro formats with automatic type coercion.
+
+    Args:
+        target_table_name: PostgreSQL table name (schema.table or just table).
+        bucket_name: GCS bucket name.
+        object_name: GCS object path/filename.
+        postgres_conn_id: PostgreSQL connection ID.
+        gcp_conn_id: GCP connection ID. Defaults to 'google_cloud_default'.
+        conflict_columns: Columns for upsert conflict resolution. Optional.
+        replace: If True, replace table content. If False, append. Defaults to False.
+        grant_table_privileges: If True, grant ALL privileges to PUBLIC.
+            Defaults to True.
+        create_if_empty: If True, create table when source is empty.
+            Defaults to False.
+        create_if_missing: If True, create table if it doesn't exist.
+            Defaults to False.
+        source_schema: Source column types for type coercion. Optional.
+        audit_cols_to_exclude: Columns to exclude from updates during upsert.
+        dry_run: If True, simulate the operation without writing data.
+    """
+
     JSON_COLUMN_TYPES = {'JSON', 'JSONB'}
 
     def __init__(

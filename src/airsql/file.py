@@ -11,18 +11,16 @@ from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
 
 class File:
-    """
-    Represents a SQL file with optional Jinja templating.
+    """Represents a SQL file with optional Jinja templating.
 
-    Examples:
-        # Simple SQL file
-        File("queries/user_analysis.sql")
+    The File object helps locate and render SQL files. It searches for files
+    in a few places (absolute path, caller-relative, and configured search
+    paths) and supports rendering with Jinja variables.
 
-        # SQL file with Jinja variables
-        File("queries/date_range_report.sql", variables={"start_date": "2025-01-01"})
-
-        # SQL file with custom base path
-        File("user_analysis.sql", base_path="/path/to/sql/files")
+    Args:
+        file_path: Path to the SQL file (relative or absolute).
+        variables: Variables for Jinja templating. Optional.
+        base_path: Base directory for relative paths. Optional.
     """
 
     def __init__(
@@ -38,10 +36,13 @@ class File:
 
     @property
     def full_path(self) -> Path:
-        """
-        Get the full path to the SQL file.
+        """Get the full path to the SQL file.
 
-        Uses the base_path if provided, otherwise falls back to default 'sql' directory.
+        Uses the base_path if provided, otherwise falls back to default
+        'sql' directory.
+
+        Returns:
+            Path object pointing to the SQL file.
         """
         if Path(self.file_path).is_absolute():
             return Path(self.file_path)
@@ -52,7 +53,14 @@ class File:
         return Path('sql') / self.file_path
 
     def read_content(self) -> str:
-        """Read the SQL file content."""
+        """Read the SQL file content.
+
+        Returns:
+            The raw content of the SQL file.
+
+        Raises:
+            FileNotFoundError: If the SQL file does not exist.
+        """
         if self._content is None:
             if not self.full_path.exists():
                 raise FileNotFoundError(f'SQL file not found: {self.full_path}')
@@ -62,14 +70,13 @@ class File:
         return self._content
 
     def render(self, context: Optional[Dict[str, Any]] = None) -> str:  # noqa: C901
-        """
-        Render the SQL file with Jinja templating.
+        """Render the SQL file with Jinja templating.
 
         Args:
-            context: Additional context variables for Jinja rendering
+            context: Additional context variables for Jinja rendering.
 
         Returns:
-            Rendered SQL string
+            Rendered SQL string.
         """
         if Path(self.file_path).is_absolute():
             sql_path = Path(self.file_path)
@@ -113,7 +120,7 @@ class File:
                     )
 
                     template = env.get_template(self.file_path)
-                    sql_content = template.source
+                    sql_content = template.render()
 
                 except Exception as e:
                     search_paths_str = ', '.join(search_paths)

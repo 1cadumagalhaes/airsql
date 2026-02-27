@@ -4,15 +4,16 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 class PostgresSqlSensor(SqlSensor):
-    """
-    PostgreSQL SQL sensor that extends the standard SqlSensor with retry logic.
+    """PostgreSQL SQL sensor with retry logic.
 
-    This sensor executes a SQL query and succeeds when the query returns any rows.
-    It includes retry logic and will skip the task if the poke fails after the
-    specified retries.
+    This sensor executes a SQL query and succeeds when the query returns any
+    rows. It includes retry logic and will skip the task if the poke fails
+    after the specified number of retries.
 
-    :param retries: Number of retries before skipping the task
-    :param postgres_conn_id: The PostgreSQL connection ID to use
+    Args:
+        conn_id: The PostgreSQL connection ID to use. Defaults to 'postgres_default'.
+        retries: Number of retries before skipping the task. Defaults to 1.
+        **kwargs: Additional arguments passed to SqlSensor.
     """
 
     def __init__(self, *, retries=1, conn_id='postgres_default', **kwargs):
@@ -21,6 +22,17 @@ class PostgresSqlSensor(SqlSensor):
         self.retries = retries
 
     def poke(self, context):
+        """Execute the sensor check.
+
+        Args:
+            context: Airflow task context.
+
+        Returns:
+            True if the query returns rows, False otherwise.
+
+        Raises:
+            AirflowSkipException: If poke returns False after retries are exhausted.
+        """
         self.poke_count += 1
         super_poke = super().poke(context)
         if not super_poke and self.poke_count > self.retries:
@@ -28,5 +40,9 @@ class PostgresSqlSensor(SqlSensor):
         return super_poke
 
     def _get_hook(self) -> PostgresHook:
-        """Get the PostgreSQL hook for the sensor."""
+        """Get the PostgreSQL hook for the sensor.
+
+        Returns:
+            PostgresHook instance for the configured connection.
+        """
         return PostgresHook(postgres_conn_id=self.conn_id)

@@ -7,13 +7,33 @@ from airsql.enums import BigQueryExportFormat
 
 
 class BigQueryToPostgresOperator(BaseOperator):
-    """
-    Enhanced operator that transfers data from BigQuery to PostgreSQL with:
-    - Table existence and data validation using sensors
-    - Temporary GCS staging with automatic cleanup
-    - Asset emission for lineage tracking
+    """Transfer data from BigQuery to PostgreSQL via GCS staging.
 
-    This operator combines BigQuery→GCS→PostgreSQL transfer with proper validation.
+    This operator extracts data from BigQuery to a temporary GCS location,
+    then loads into PostgreSQL. Includes source validation, automatic format
+    detection, and cleanup.
+
+    Args:
+        source_project_dataset_table: BigQuery source table
+            (project.dataset.table or dataset.table).
+        postgres_conn_id: PostgreSQL connection ID.
+        destination_table: PostgreSQL destination table (schema.table).
+        gcp_conn_id: GCP connection ID. Defaults to 'google_cloud_default'.
+        gcs_bucket: GCS bucket for temporary staging.
+        gcs_temp_path: GCS path for temp files. Auto-generated if not provided.
+        export_format: Export format: 'parquet', 'csv', 'jsonl', or 'avro'.
+            Defaults to 'parquet'.
+        auto_detect_json_columns: If True, detect JSON columns from BigQuery.
+            Defaults to True.
+        check_source_exists: If True, validate source has data before transfer.
+        source_table_check_sql: Custom SQL for source validation. Optional.
+        conflict_columns: Columns for upsert conflict resolution. Optional.
+        replace: If True, replace table content. If False and conflict_columns
+            provided, perform upsert. Defaults to True.
+        create_if_empty: If True, create empty table when source is empty.
+        emit_asset: If True, emit Airflow asset for lineage. Defaults to True.
+        cleanup_temp_files: If True, delete GCS temp files after load. Defaults to True.
+        dry_run: If True, simulate the operation without writing data.
     """
 
     template_fields = [

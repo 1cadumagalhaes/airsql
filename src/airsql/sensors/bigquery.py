@@ -3,6 +3,19 @@ from airflow.providers.common.sql.sensors.sql import SqlSensor
 
 
 class BigQuerySqlSensor(SqlSensor):
+    """BigQuery SQL sensor with retry logic.
+
+    This sensor executes a SQL query against BigQuery and succeeds when the
+    query returns any rows. It includes retry logic and will skip the task
+    if the poke fails after the specified number of retries.
+
+    Args:
+        conn_id: The BigQuery connection ID to use.
+        location: BigQuery location. Defaults to 'us-central1'.
+        retries: Number of retries before skipping the task. Defaults to 1.
+        **kwargs: Additional arguments passed to SqlSensor.
+    """
+
     def __init__(self, *, retries=1, location: str = 'us-central1', **kwargs):
         super().__init__(**kwargs)
         self.location = location
@@ -10,6 +23,17 @@ class BigQuerySqlSensor(SqlSensor):
         self.retries = retries
 
     def poke(self, context):
+        """Execute the sensor check.
+
+        Args:
+            context: Airflow task context.
+
+        Returns:
+            True if the query returns rows, False otherwise.
+
+        Raises:
+            AirflowSkipException: If poke returns False after retries are exhausted.
+        """
         self.poke_count += 1
         super_poke = super().poke(context)
         if not super_poke and self.poke_count > self.retries:
@@ -17,6 +41,14 @@ class BigQuerySqlSensor(SqlSensor):
         return super_poke
 
     def _get_hook(self, location='us-central1'):
+        """Get the BigQuery hook for the sensor.
+
+        Args:
+            location: BigQuery location. Defaults to 'us-central1'.
+
+        Returns:
+            BigQueryHook instance for the configured connection.
+        """
         from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
             BigQueryHook,  # noqa: PLC0415
         )
