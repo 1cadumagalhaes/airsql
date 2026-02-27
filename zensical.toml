@@ -1,0 +1,159 @@
+[project]
+site_name = "AirSQL"
+site_url = "https://1cadumagalhaes.github.io/airsql/"
+site_description = "AirSQL - A decorator-based SQL execution framework for Apache Airflow"
+site_author = "Cadu Magalhaes"
+repo_url = "https://github.com/1cadumagalhaes/airsql"
+repo_name = "1cadumagalhaes/airsql"
+
+copyright = """
+Copyright &copy; 2026 Cadu Magalhaes –
+<a href="#__consent">Change cookie settings</a>
+"""
+
+nav = [
+  { "AirSQL" = [
+    "index.md",
+    { "Getting Started" = "getting-started.md" },
+    { "Core Concepts" = "core-concepts.md" }
+  ]},
+  { Usage = [
+    "usage/index.md",
+    { Query = [
+      "usage/query/index.md",
+      { "Return DataFrame" = "usage/query/dataframe.md" },
+      { "Query to Table" = "usage/query/query.md" },
+      { "Append to Table" = "usage/query/append.md" },
+      { "Replace Table" = "usage/query/replace.md" },
+      { "Truncate and Reload" = "usage/query/truncate.md" },
+      { "Merge/Upsert" = "usage/query/merge.md" },
+      { "Load DataFrame" = "usage/query/load-dataframe.md" },
+      { "Merge DataFrame" = "usage/query/merge-dataframe.md" },
+      { "Extract and Load" = "usage/query/extract-and-load.md" },
+      { "Extract and Merge" = "usage/query/extract-and-merge.md" },
+      { "Data Quality Checks" = "usage/query/check.md" },
+      { "DDL Operations" = "usage/query/ddl.md" }
+    ]},
+    { Sensors = [
+      "usage/sensors/index.md",
+      { "PostgreSQL Sensor" = "usage/sensors/postgres.md" },
+      { "BigQuery Sensor" = "usage/sensors/bigquery.md" }
+    ]},
+    { Transfers = [
+      "usage/transfers/index.md",
+      { "BigQuery to PostgreSQL" = "usage/transfers/bigquery-to-postgres.md" },
+      { "PostgreSQL to BigQuery" = "usage/transfers/postgres-to-bigquery.md" },
+      { "PostgreSQL to GCS" = "usage/transfers/postgres-to-gcs.md" },
+      { "GCS to PostgreSQL" = "usage/transfers/gcs-to-postgres.md" }
+    ]}
+  ]},
+  { Examples = "examples/index.md" },
+  { "API Reference" = "reference/index.md" },
+  { About = "about/index.md" }
+]
+
+[project.theme]
+variant = "material"
+language = "en"
+features = [
+    "navigation.instant",
+    "navigation.instant.prefetch",
+    "navigation.tracking",
+    "navigation.tabs",
+    "navigation.tabs.sticky",
+    "navigation.sections",
+    "navigation.expand",
+    "navigation.indexes",
+    "navigation.top",
+    "navigation.footer",
+    "toc.follow",
+    "content.code.copy",
+    "content.code.annotate",
+    "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "black"
+accent = "grey"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "blue grey"
+accent = "indigo"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[project.theme.icon.tag]
+default = "lucide/hash"
+operators = "lucide/database"
+sensors = "lucide/radar"
+transfers = "lucide/arrow-right-left"
+reference = "lucide/book-open"
+
+[project.extra.consent]
+title = "Cookie consent"
+description = """
+We use cookies to recognize your repeated visits and preferences, as well
+as to measure the effectiveness of our documentation and whether users
+find what they're searching for. With your consent, you're helping us to
+make our documentation better.
+"""
+actions = ["accept", "manage"]
+
+[project.extra.tags]
+Operators = "operators"
+Sensors = "sensors"
+Transfers = "transfers"
+Reference = "reference"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/linkedin"
+link = "https://linkedin.com/in/1cadumagalhaes"
+name = "Cadu Magalhaes on LinkedIn"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/1cadumagalhaes/airsql"
+name = "AirSQL on GitHub"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/x-twitter"
+link = "https://x.com/1cadumagalhaes"
+name = "Cadu Magalhaes on X"
+
+[project.markdown_extensions]
+"toc" = { permalink = true }
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+[project.markdown_extensions.pymdownx.superfences]
+
+[project.plugins.mkdocstrings.handlers.python]
+inventories = ["https://docs.python.org/3/objects.inv"]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+inherited_members = true
+show_source = false
+show_root_heading = true
+show_root_full_path = false
+show_symbol_type_heading = true
+show_symbol_type_toc = true
+heading_level = 2
+parameter_headings = true
+show_signature_annotations = true
+separate_signature = true
+members_order = "source"
+group_by_category = true
+show_category_heading = true
+show_labels = true
+filters = ["!^_[^_]"]
