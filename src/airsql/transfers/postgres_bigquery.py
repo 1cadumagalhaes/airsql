@@ -32,6 +32,8 @@ class PostgresToBigQueryOperator(BaseOperator):
         postgres_conn_id: PostgreSQL connection ID.
         sql: SQL query to extract data. Mutually exclusive with
             source_project_dataset_table.
+        where: WHERE clause to filter data. Only applies when
+            source_project_dataset_table is used. Mutually exclusive with sql.
         source_project_dataset_table: Source table (postgres.schema.table).
             Used if sql is not provided.
         destination_project_dataset_table: BigQuery destination table
@@ -60,7 +62,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         dry_run: If True, simulate the operation without writing data.
     """
 
-    template_fields = ['sql', 'destination_table', 'gcs_temp_path']
+    template_fields = ['sql', 'where', 'destination_table', 'gcs_temp_path']
     ui_color = '#4285f4'
 
     def __init__(
@@ -68,6 +70,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         *,
         postgres_conn_id: str,
         sql: str | None = '',
+        where: Optional[str] = None,
         source_project_dataset_table: str | None = None,
         destination_project_dataset_table: str,
         gcp_conn_id: str = 'google_cloud_default',
@@ -95,6 +98,18 @@ class PostgresToBigQueryOperator(BaseOperator):
     ):
         super().__init__(**kwargs)
 
+        if sql and where:
+            raise ValueError(
+                'where clause cannot be used with sql parameter. '
+                'Include the WHERE condition in your sql query instead.'
+            )
+        if sql and source_project_dataset_table:
+            raise ValueError(
+                'sql and source_project_dataset_table are mutually exclusive'
+            )
+        if where and not source_project_dataset_table:
+            raise ValueError('where can only be used with source_project_dataset_table')
+
         if export_format not in PostgresExportFormat.values():
             raise ValueError(
                 f"Invalid export_format: '{export_format}'. "
@@ -103,7 +118,16 @@ class PostgresToBigQueryOperator(BaseOperator):
             )
 
         self.postgres_conn_id = postgres_conn_id
-        self.sql = sql or f'SELECT * FROM {source_project_dataset_table}'  # noqa: S608
+        self.where = where
+        self.source_project_dataset_table = source_project_dataset_table
+
+        if sql:
+            self.sql = sql
+        elif where:
+            self.sql = f'SELECT * FROM {source_project_dataset_table} WHERE {where}'
+        else:
+            self.sql = sql or f'SELECT * FROM {source_project_dataset_table}'  # noqa: S608
+
         self.destination_table = destination_project_dataset_table
         self.gcp_conn_id = gcp_conn_id
         self.gcs_bucket = gcs_bucket

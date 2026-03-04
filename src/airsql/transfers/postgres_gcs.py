@@ -237,6 +237,8 @@ class PostgresToGCSOperator(BaseOperator):
     Args:
         postgres_conn_id: Reference to a specific Postgres hook.
         sql: The SQL query to be executed.
+        where: Optional WHERE clause to append to the SQL query.
+            Mutually exclusive with providing a complete WHERE in sql.
         bucket: The GCS bucket to upload to.
         filename: The GCS filename to upload to (including a folder).
         gcp_conn_id: The connection ID used to connect to Google Cloud.
@@ -265,6 +267,7 @@ class PostgresToGCSOperator(BaseOperator):
 
     template_fields: Sequence[str] = (
         'sql',
+        'where',
         'bucket',
         'filename',
         'schema_filename',
@@ -279,6 +282,7 @@ class PostgresToGCSOperator(BaseOperator):
         *,
         postgres_conn_id: str,
         sql: str,
+        where: Optional[str] = None,
         bucket: str,
         filename: str,
         gcp_conn_id: str = 'google_cloud_default',
@@ -313,6 +317,7 @@ class PostgresToGCSOperator(BaseOperator):
 
         self.postgres_conn_id = postgres_conn_id
         self.sql = sql
+        self.where = where
         self.bucket = bucket
         self.filename = filename
         self.gcp_conn_id = gcp_conn_id
@@ -335,6 +340,19 @@ class PostgresToGCSOperator(BaseOperator):
                 f"Unsupported format: {self.export_format}. Must be 'csv', 'parquet', or 'jsonl'."
             )
 
+    def _get_final_query(self) -> str:
+        """Get the final SQL query with WHERE clause applied if provided."""
+        if not self.where:
+            return self.sql
+
+        if ' WHERE ' in self.sql.upper():
+            self.log.warning(
+                'SQL query already contains WHERE clause. Appending additional WHERE with AND.'
+            )
+            return f'{self.sql} AND {self.where}'
+
+        return f'{self.sql} WHERE {self.where}'
+
     def _detect_json_columns(self, pg_hook) -> set:
         """Detect JSON/JSONB columns from the source PostgreSQL query.
 
@@ -342,7 +360,8 @@ class PostgresToGCSOperator(BaseOperator):
         """
         json_columns = set()
         try:
-            type_query = f'SELECT * FROM ({self.sql}) AS subquery LIMIT 0'  # noqa: S608
+            query = self._get_final_query()
+            type_query = f'SELECT * FROM ({query}) AS subquery LIMIT 0'  # noqa: S608
             conn = pg_hook.get_conn()
             cur = conn.cursor()
             cur.execute(type_query)
@@ -373,7 +392,8 @@ class PostgresToGCSOperator(BaseOperator):
         """
         column_types: Dict[str, str] = {}
         try:
-            type_query = f'SELECT * FROM ({self.sql}) AS subquery LIMIT 0'  # noqa: S608
+            query = self._get_final_query()
+            type_query = f'SELECT * FROM ({query}) AS subquery LIMIT 0'  # noqa: S608
             conn = pg_hook.get_conn()
             cur = conn.cursor()
             cur.execute(type_query)
@@ -417,12 +437,13 @@ class PostgresToGCSOperator(BaseOperator):
             return problematic_columns
 
         try:
+            query = self._get_final_query()
             quoted_cols = [
                 f'"{col}"' if col.lower() != col else col for col in text_columns
             ]
             cols_str = ', '.join(quoted_cols)
             sample_query = (
-                f'SELECT {cols_str} FROM ({self.sql}) AS subquery LIMIT {sample_size}'  # noqa: S608
+                f'SELECT {cols_str} FROM ({query}) AS subquery LIMIT {sample_size}'  # noqa: S608
             )
 
             conn = pg_hook.get_conn()
@@ -458,11 +479,12 @@ class PostgresToGCSOperator(BaseOperator):
         """
         # Determine if we need JSONL format
         use_jsonl = bool(json_columns) or self.export_format == 'jsonl'
+        query = self._get_final_query()
 
         if use_jsonl:
             # For JSONL, use row_to_json to convert entire row to JSON
             # This handles all types including JSON columns properly
-            return f'SELECT row_to_json(t) FROM ({self.sql}) AS t'  # noqa: S608
+            return f'SELECT row_to_json(t) FROM ({query}) AS t'  # noqa: S608
 
         # For CSV format, build column list with proper escaping
         # Handle special types that need casting to text
@@ -477,7 +499,7 @@ class PostgresToGCSOperator(BaseOperator):
                 columns.append(quoted_col)
 
         columns_str = ', '.join(columns)
-        return f'SELECT {columns_str} FROM ({self.sql}) AS subquery'  # noqa: S608
+        return f'SELECT {columns_str} FROM ({query}) AS subquery'  # noqa: S608
 
     def _stream_copy_to_gcs(
         self, pg_hook, gcs_hook, copy_query: str, use_jsonl: bool
@@ -675,7 +697,8 @@ class PostgresToGCSOperator(BaseOperator):
         pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
 
-        self.log.info(f'Extracting data from Postgres using query: {self.sql}')
+        final_query = self._get_final_query()
+        self.log.info(f'Extracting data from Postgres using query: {final_query}')
 
         if self.use_copy:
             self.log.info('Using COPY TO for memory-efficient streaming')
@@ -869,7 +892,7 @@ class PostgresToGCSOperator(BaseOperator):
                     import pyarrow.parquet as pq  # noqa: PLC0415
 
                 for chunk in pd.read_sql(
-                    self.sql,
+                    final_query,
                     engine,
                     chunksize=self.pandas_chunksize,
                     dtype_backend='pyarrow',
@@ -947,7 +970,7 @@ class PostgresToGCSOperator(BaseOperator):
             file_size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
             validation_result = ValidationResult(is_valid=True)
         else:
-            df = pd.read_sql(self.sql, engine, dtype_backend='pyarrow')
+            df = pd.read_sql(final_query, engine, dtype_backend='pyarrow')
             if df.empty:
                 self.log.info(
                     'No data extracted from Postgres. Skipping upload to GCS.'
