@@ -15,7 +15,11 @@ class BigQueryToPostgresOperator(BaseOperator):
 
     Args:
         source_project_dataset_table: BigQuery source table
-            (project.dataset.table or dataset.table).
+            (project.dataset.table or dataset.table). Required if sql is not provided.
+        sql: SQL query to export. Mutually exclusive with source_project_dataset_table.
+            If provided, the query result is exported to PostgreSQL.
+        where: WHERE clause to filter data. Only applies when source_project_dataset_table
+            is used. Mutually exclusive with sql.
         postgres_conn_id: PostgreSQL connection ID.
         destination_table: PostgreSQL destination table (schema.table).
         gcp_conn_id: GCP connection ID. Defaults to 'google_cloud_default'.
@@ -40,6 +44,8 @@ class BigQueryToPostgresOperator(BaseOperator):
         'source_table',
         'destination_table',
         'gcs_temp_path',
+        'sql',
+        'where',
     ]
     ui_color = '#336791'
 
@@ -85,7 +91,9 @@ class BigQueryToPostgresOperator(BaseOperator):
     def __init__(
         self,
         *,
-        source_project_dataset_table: str,
+        source_project_dataset_table: Optional[str] = None,
+        sql: Optional[str] = None,
+        where: Optional[str] = None,
         postgres_conn_id: str,
         destination_table: str,
         gcp_conn_id: str = 'google_cloud_default',
@@ -104,8 +112,25 @@ class BigQueryToPostgresOperator(BaseOperator):
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        if not source_project_dataset_table and not sql:
+            raise ValueError(
+                'Either source_project_dataset_table or sql must be provided'
+            )
+        if source_project_dataset_table and sql:
+            raise ValueError(
+                'source_project_dataset_table and sql are mutually exclusive'
+            )
+        if where and sql:
+            raise ValueError(
+                'where clause cannot be used with sql parameter. '
+                'Include the WHERE condition in your sql query instead.'
+            )
+
         self.source_project_dataset_table = source_project_dataset_table
-        self.source_table = source_project_dataset_table
+        self.sql = sql
+        self.where = where
+        self.source_table = source_project_dataset_table or ''
         self.postgres_conn_id = postgres_conn_id
         self.destination_table = destination_table
         self.gcp_conn_id = gcp_conn_id
@@ -180,30 +205,14 @@ class BigQueryToPostgresOperator(BaseOperator):
                 f'Extracting data from BigQuery to GCS: gs://{self.gcs_bucket}/{actual_gcs_temp_path}'
             )
 
-            # Lazy import - only load when actually executing
-            from airflow.providers.google.cloud.transfers.bigquery_to_gcs import (  # noqa: PLC0415
-                BigQueryToGCSOperator,
-            )
-
-            # Map user-friendly format to BigQuery API format
-            api_format = self.FORMAT_API_MAP.get(actual_export_format, 'PARQUET')
-
-            # Build BigQueryToGCSOperator kwargs based on format
-            bq_to_gcs_kwargs = {
-                'task_id': f'{self.task_id}_extract',
-                'source_project_dataset_table': self.source_table,
-                'destination_cloud_storage_uris': [
-                    f'gs://{self.gcs_bucket}/{actual_gcs_temp_path}'
-                ],
-                'gcp_conn_id': self.gcp_conn_id,
-                'export_format': api_format,
-            }
-            # Only add print_header for CSV format
-            if actual_export_format == 'csv':
-                bq_to_gcs_kwargs['print_header'] = True
-
-            bq_to_gcs = BigQueryToGCSOperator(**bq_to_gcs_kwargs)
-            bq_to_gcs.execute(context)
+            if self.sql or self.where:
+                self._export_query_to_gcs(
+                    context, actual_export_format, actual_gcs_temp_path
+                )
+            else:
+                self._export_table_to_gcs(
+                    context, actual_export_format, actual_gcs_temp_path
+                )
 
             self.log.info(
                 f'Loading data from GCS to PostgreSQL: {self.destination_table}'
@@ -243,16 +252,78 @@ class BigQueryToPostgresOperator(BaseOperator):
 
         return self.destination_table
 
+    def _get_source_query(self) -> str:
+        """Get the source query based on sql, where, or table."""
+        if self.sql:
+            return self.sql
+        if self.where:
+            return f'SELECT * FROM `{self.source_table}` WHERE {self.where}'
+        return f'SELECT * FROM `{self.source_table}`'
+
+    def _export_table_to_gcs(
+        self, context: Context, export_format: str, gcs_path: str
+    ) -> None:
+        """Export table to GCS using BigQueryToGCSOperator."""
+        from airflow.providers.google.cloud.transfers.bigquery_to_gcs import (  # noqa: PLC0415
+            BigQueryToGCSOperator,
+        )
+
+        api_format = self.FORMAT_API_MAP.get(export_format, 'PARQUET')
+
+        bq_to_gcs_kwargs = {
+            'task_id': f'{self.task_id}_extract',
+            'source_project_dataset_table': self.source_table,
+            'destination_cloud_storage_uris': [f'gs://{self.gcs_bucket}/{gcs_path}'],
+            'gcp_conn_id': self.gcp_conn_id,
+            'export_format': api_format,
+        }
+        if export_format == 'csv':
+            bq_to_gcs_kwargs['print_header'] = True
+
+        bq_to_gcs = BigQueryToGCSOperator(**bq_to_gcs_kwargs)
+        bq_to_gcs.execute(context)
+
+    def _export_query_to_gcs(
+        self, context: Context, export_format: str, gcs_path: str
+    ) -> None:
+        """Export query results to GCS using EXPORT DATA statement."""
+        from airflow.providers.google.cloud.operators.bigquery import (  # noqa: PLC0415
+            BigQueryInsertJobOperator,
+        )
+
+        source_query = self._get_source_query()
+        api_format = self.FORMAT_API_MAP.get(export_format, 'PARQUET')
+
+        export_sql = f"""
+        EXPORT DATA OPTIONS(
+            uri='gs://{self.gcs_bucket}/{gcs_path}',
+            format='{api_format}'
+        ) AS {source_query}
+        """
+
+        job_operator = BigQueryInsertJobOperator(
+            task_id=f'{self.task_id}_extract',
+            configuration={'query': {'query': export_sql}},
+            gcp_conn_id=self.gcp_conn_id,
+        )
+        job_operator.execute(context)
+
     def _check_source_data(self, context: Context) -> None:
-        """Check if source table exists and has data."""
+        """Check if source table/query exists and has data."""
         from airsql.sensors.bigquery import BigQuerySqlSensor  # noqa: PLC0415
 
         if self.source_table_check_sql:
             check_sql = self.source_table_check_sql
+        elif self.sql:
+            check_sql = f'SELECT 1 FROM ({self.sql}) AS subquery LIMIT 1'
+        elif self.where:
+            check_sql = (
+                f'SELECT 1 FROM `{self.source_table}` WHERE {self.where} LIMIT 1'
+            )
         else:
-            check_sql = f'SELECT 1 FROM `{self.source_table}` LIMIT 1'  # noqa: S608
+            check_sql = f'SELECT 1 FROM `{self.source_table}` LIMIT 1'
 
-        self.log.info('Checking source table existence and data availability')
+        self.log.info('Checking source data availability')
         sensor = BigQuerySqlSensor(
             task_id=f'{self.task_id}_source_check',
             conn_id=self.gcp_conn_id,
@@ -262,31 +333,45 @@ class BigQueryToPostgresOperator(BaseOperator):
             timeout=300,
         )
         sensor.execute(context)
-        self.log.info('Source table validation successful')
+        self.log.info('Source validation successful')
 
     def _detect_json_columns(self, bq_hook: Any) -> Set[str]:
-        """Detect JSON columns in the BigQuery table schema."""
+        """Detect JSON columns in the BigQuery schema."""
 
         json_columns: Set[str] = set()
 
         try:
-            parts = self.source_table.split('.')
-            if len(parts) == self.TABLE_NAME_WITH_PROJECT_PARTS:
-                project_id, dataset_id, table_id = parts
-            elif len(parts) == self.TABLE_NAME_WITHOUT_PROJECT_PARTS:
-                dataset_id, table_id = parts
-                project_id = bq_hook.project_id
+            if self.sql or self.where:
+                source_query = self._get_source_query()
+                schema_query = f'SELECT * FROM ({source_query}) AS subquery LIMIT 0'
+
+                client = bq_hook.get_client()
+                query_job = client.query(schema_query)
+                query_job.result()
+
+                for field in query_job.schema:
+                    if field.field_type.upper() in self.JSON_COLUMN_TYPES:
+                        json_columns.add(field.name)
             else:
-                self.log.warning(f'Invalid table name format: {self.source_table}')
-                return json_columns
+                parts = self.source_table.split('.')
+                if len(parts) == self.TABLE_NAME_WITH_PROJECT_PARTS:
+                    project_id, dataset_id, table_id = parts
+                elif len(parts) == self.TABLE_NAME_WITHOUT_PROJECT_PARTS:
+                    dataset_id, table_id = parts
+                    project_id = bq_hook.project_id
+                else:
+                    self.log.warning(f'Invalid table name format: {self.source_table}')
+                    return json_columns
 
-            client = bq_hook.get_client()
-            table_ref = client.dataset(dataset_id, project=project_id).table(table_id)
-            table_obj = client.get_table(table_ref)
+                client = bq_hook.get_client()
+                table_ref = client.dataset(dataset_id, project=project_id).table(
+                    table_id
+                )
+                table_obj = client.get_table(table_ref)
 
-            for field in table_obj.schema:
-                if field.field_type.upper() in self.JSON_COLUMN_TYPES:
-                    json_columns.add(field.name)
+                for field in table_obj.schema:
+                    if field.field_type.upper() in self.JSON_COLUMN_TYPES:
+                        json_columns.add(field.name)
 
         except Exception as e:
             self.log.warning(f'Failed to detect JSON columns: {e}')
@@ -294,27 +379,43 @@ class BigQueryToPostgresOperator(BaseOperator):
         return json_columns
 
     def _get_bq_schema(self, bq_hook: Any) -> dict:
-        """Get BigQuery table schema as a dict mapping column names to types.
+        """Get BigQuery schema as a dict mapping column names to types.
 
         Returns:
             Dict mapping column names to BigQuery field types (uppercase)
         """
         try:
-            parts = self.source_table.split('.')
-            if len(parts) == self.TABLE_NAME_WITH_PROJECT_PARTS:
-                project_id, dataset_id, table_id = parts
-            elif len(parts) == self.TABLE_NAME_WITHOUT_PROJECT_PARTS:
-                dataset_id, table_id = parts
-                project_id = bq_hook.project_id
+            if self.sql or self.where:
+                source_query = self._get_source_query()
+                schema_query = f'SELECT * FROM ({source_query}) AS subquery LIMIT 0'
+
+                client = bq_hook.get_client()
+                query_job = client.query(schema_query)
+                query_job.result()
+
+                return {
+                    field.name: field.field_type.upper() for field in query_job.schema
+                }
             else:
-                self.log.warning(f'Invalid table name format: {self.source_table}')
-                return {}
+                parts = self.source_table.split('.')
+                if len(parts) == self.TABLE_NAME_WITH_PROJECT_PARTS:
+                    project_id, dataset_id, table_id = parts
+                elif len(parts) == self.TABLE_NAME_WITHOUT_PROJECT_PARTS:
+                    dataset_id, table_id = parts
+                    project_id = bq_hook.project_id
+                else:
+                    self.log.warning(f'Invalid table name format: {self.source_table}')
+                    return {}
 
-            client = bq_hook.get_client()
-            table_ref = client.dataset(dataset_id, project=project_id).table(table_id)
-            table_obj = client.get_table(table_ref)
+                client = bq_hook.get_client()
+                table_ref = client.dataset(dataset_id, project=project_id).table(
+                    table_id
+                )
+                table_obj = client.get_table(table_ref)
 
-            return {field.name: field.field_type.upper() for field in table_obj.schema}
+                return {
+                    field.name: field.field_type.upper() for field in table_obj.schema
+                }
 
         except Exception as e:
             self.log.warning(f'Failed to get BigQuery schema: {e}')

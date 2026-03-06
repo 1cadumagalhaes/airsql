@@ -660,3 +660,167 @@ class TestPostgresToBigQuerySchemaUpdate:
         # Verify the schema_object uses the updated filename
         assert captured.get('schema_object') == 'temp/data.jsonl.schema.json'
         assert captured.get('source_format') == 'NEWLINE_DELIMITED_JSON'
+
+
+class TestWhereParameter:
+    """Test the where parameter functionality."""
+
+    def test_get_final_query_without_where(self):
+        op = PostgresToGCSOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT * FROM users',
+            bucket='bucket',
+            filename='file.csv',
+        )
+
+        result = op._get_final_query()
+        assert result == 'SELECT * FROM users'
+
+    def test_get_final_query_with_where(self):
+        op = PostgresToGCSOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT * FROM users',
+            where='active = true',
+            bucket='bucket',
+            filename='file.csv',
+        )
+
+        result = op._get_final_query()
+        assert result == 'SELECT * FROM users WHERE active = true'
+
+    def test_where_appends_to_existing_where(self):
+        op = PostgresToGCSOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT * FROM users WHERE age > 18',
+            where="country = 'US'",
+            bucket='bucket',
+            filename='file.csv',
+        )
+
+        result = op._get_final_query()
+        assert "WHERE age > 18 AND country = 'US'" in result
+
+    def test_where_none_returns_original_sql(self):
+        op = PostgresToGCSOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT * FROM users',
+            where=None,
+            bucket='bucket',
+            filename='file.csv',
+        )
+
+        result = op._get_final_query()
+        assert result == 'SELECT * FROM users'
+
+    def test_detect_json_columns_uses_final_query(self):
+        op = PostgresToGCSOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT * FROM users',
+            where='active = true',
+            bucket='bucket',
+            filename='file.csv',
+        )
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.description = [
+            ('id', 23, None, None, None, None, None),
+            ('metadata', 114, None, None, None, None, None),
+        ]
+        mock_cursor.execute = MagicMock()
+        mock_cursor.close = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        type_cursor = MagicMock()
+        type_cursor.fetchone.side_effect = [('int4',), ('json',)]
+        type_cursor.close = MagicMock()
+
+        call_count = [0]
+
+        def cursor_factory():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return mock_cursor
+            return type_cursor
+
+        mock_conn.cursor.side_effect = cursor_factory
+
+        mock_hook = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        result = op._detect_json_columns(mock_hook)
+
+        assert 'metadata' in result
+        assert 'id' not in result
+        mock_cursor.execute.assert_called_once()
+        call_arg = mock_cursor.execute.call_args[0][0]
+        assert 'WHERE active = true' in call_arg
+
+    def test_get_column_types_uses_final_query(self):
+        op = PostgresToGCSOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT id, name FROM users',
+            where='active = true',
+            bucket='bucket',
+            filename='file.csv',
+        )
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.description = [
+            ('id', 23, None, None, None, None, None),
+            ('name', 25, None, None, None, None, None),
+        ]
+        mock_cursor.execute = MagicMock()
+        mock_cursor.close = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        type_cursor = MagicMock()
+        type_cursor.fetchone.side_effect = [('int4',), ('text',)]
+        type_cursor.close = MagicMock()
+
+        call_count = [0]
+
+        def cursor_factory():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return mock_cursor
+            return type_cursor
+
+        mock_conn.cursor.side_effect = cursor_factory
+
+        mock_hook = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        result = op._get_column_types(mock_hook)
+
+        assert result == {'id': 'int4', 'name': 'text'}
+        call_arg = mock_cursor.execute.call_args[0][0]
+        assert 'WHERE active = true' in call_arg
+
+    def test_build_copy_query_uses_final_query_with_where(self):
+        op = PostgresToGCSOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT id, name FROM users',
+            where='active = true',
+            bucket='bucket',
+            filename='file.csv',
+        )
+
+        column_types = {'id': 'int4', 'name': 'text'}
+        json_columns = set()
+
+        result = op._build_copy_query(column_types, json_columns)
+
+        assert 'WHERE active = true' in result
+        assert (
+            'SELECT id, name FROM (SELECT id, name FROM users WHERE active = true) AS subquery'
+            == result
+        )
