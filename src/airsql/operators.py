@@ -29,7 +29,10 @@ def _is_bigquery_hook(hook: Any) -> bool:
 def _read_dataframe_from_hook(hook: Any, sql: str):
     def _convert_to_numpy_dtypes(df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
-            if isinstance(df[col].dtype, pd.ArrowDtype):
+            dtype_name = str(df[col].dtype)
+            if dtype_name in {'dbdate', 'dbtime'}:
+                df[col] = df[col].astype('object')
+            elif isinstance(df[col].dtype, pd.ArrowDtype):
                 arrow_type = df[col].dtype.pyarrow_dtype
                 if pa.types.is_date(arrow_type):
                     df[col] = df[col].astype('datetime64[ns]').dt.date.astype('object')

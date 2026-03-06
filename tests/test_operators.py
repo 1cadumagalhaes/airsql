@@ -611,6 +611,62 @@ class TestReadDataframeFromHook:
                     f'Column {col} still has ArrowDtype'
                 )
 
+    def test_bigquery_converts_dbdate_to_object_dtype(self) -> None:
+        from datetime import date
+
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'BigQueryHook'
+
+        df_with_dbdate = pd.DataFrame({
+            'id': [1, 2, 3],
+            'date_col': pd.Series(
+                [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)], dtype='dbdate'
+            ),
+        })
+
+        mock_hook.get_pandas_df.return_value = df_with_dbdate
+
+        result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+        assert str(result['date_col'].dtype) == 'object', (
+            f'Expected object dtype, got {result["date_col"].dtype}'
+        )
+        assert result['date_col'].tolist() == [
+            date(2024, 1, 1),
+            date(2024, 1, 2),
+            date(2024, 1, 3),
+        ]
+
+    def test_bigquery_converts_dbtime_to_object_dtype(self) -> None:
+        from datetime import time
+
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'BigQueryHook'
+
+        df_with_dbtime = pd.DataFrame({
+            'id': [1, 2, 3],
+            'time_col': pd.Series(
+                [time(10, 30, 0), time(11, 45, 0), time(14, 0, 0)], dtype='dbtime'
+            ),
+        })
+
+        mock_hook.get_pandas_df.return_value = df_with_dbtime
+
+        result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+        assert str(result['time_col'].dtype) == 'object', (
+            f'Expected object dtype, got {result["time_col"].dtype}'
+        )
+        assert result['time_col'].tolist() == [
+            time(10, 30, 0),
+            time(11, 45, 0),
+            time(14, 0, 0),
+        ]
+
     def test_bigquery_handles_empty_dataframe(self) -> None:
         from airsql.operators import _read_dataframe_from_hook
 
