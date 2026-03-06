@@ -548,3 +548,79 @@ class TestSQLCheckOperator:
     def test_source_conn_maps_to_conn_id(self) -> None:
         op = SQLCheckOperator(task_id='test_task', sql=SQL_SIMPLE, source_conn=CONN_ID)
         assert op.conn_id == CONN_ID
+
+
+class TestReadDataframeFromHook:
+    def test_bigquery_converts_pyarrow_to_numpy_dtypes(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'BigQueryHook'
+
+        import pyarrow as pa
+
+        df_with_pyarrow = pd.DataFrame({
+            'id': [1, 2, 3],
+            'date_col': pd.to_datetime(['2024-01-01', '2024-01-02', '2024-01-03']),
+            'value': [10.5, 20.3, 30.1],
+        })
+        df_with_pyarrow = df_with_pyarrow.astype({
+            'id': pd.ArrowDtype(pa.int64()),
+            'date_col': pd.ArrowDtype(pa.timestamp('ns')),
+            'value': pd.ArrowDtype(pa.float64()),
+        })
+
+        mock_hook.get_pandas_df.return_value = df_with_pyarrow
+
+        result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+        for col in result.columns:
+            assert not isinstance(result[col].dtype, pd.ArrowDtype), (
+                f'Column {col} still has ArrowDtype'
+            )
+
+    def test_postgres_converts_pyarrow_to_numpy_dtypes(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_pyarrow = pd.DataFrame({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+        })
+        df_with_pyarrow = df_with_pyarrow.astype({
+            'id': pd.ArrowDtype(pa.int64()),
+            'name': pd.ArrowDtype(pa.string()),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_pyarrow
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            for col in result.columns:
+                assert not isinstance(result[col].dtype, pd.ArrowDtype), (
+                    f'Column {col} still has ArrowDtype'
+                )
+
+    def test_bigquery_handles_empty_dataframe(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'BigQueryHook'
+
+        empty_df = pd.DataFrame()
+        mock_hook.get_pandas_df.return_value = empty_df
+
+        result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table WHERE 1=0')
+
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0

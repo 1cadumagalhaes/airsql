@@ -6,6 +6,7 @@ import time
 from typing import Any, List, Optional
 
 import pandas as pd
+import pyarrow as pa
 from airflow.models import BaseOperator
 from airflow.providers.common.sql.operators.sql import (
     SQLCheckOperator as BaseSQLCheckOperator,
@@ -26,19 +27,34 @@ def _is_bigquery_hook(hook: Any) -> bool:
 
 
 def _read_dataframe_from_hook(hook: Any, sql: str):
+    def _convert_to_numpy_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+        for col in df.columns:
+            if isinstance(df[col].dtype, pd.ArrowDtype):
+                arrow_type = df[col].dtype.pyarrow_dtype
+                if pa.types.is_date(arrow_type):
+                    df[col] = df[col].astype('datetime64[ns]').dt.date.astype('object')
+                elif pa.types.is_timestamp(arrow_type):
+                    df[col] = df[col].astype('datetime64[ns]')
+                else:
+                    df[col] = df[col].astype(df[col].dtype.numpy_dtype)
+        return df
+
     if _is_bigquery_hook(hook):
-        return hook.get_pandas_df(sql, dialect='standard')
+        df = hook.get_pandas_df(sql, dialect='standard')
+        return _convert_to_numpy_dtypes(df)
 
     try:
         engine = hook.get_sqlalchemy_engine()
     except (AttributeError, NotImplementedError):
         conn = hook.get_conn()
         try:
-            return pd.read_sql(sql, conn, dtype_backend='pyarrow')
+            df = pd.read_sql(sql, conn, dtype_backend='pyarrow')
+            return _convert_to_numpy_dtypes(df)
         finally:
             conn.close()
 
-    return pd.read_sql(sql, engine, dtype_backend='pyarrow')
+    df = pd.read_sql(sql, engine, dtype_backend='pyarrow')
+    return _convert_to_numpy_dtypes(df)
 
 
 class BaseSQLOperator(BaseOperator):
@@ -100,7 +116,7 @@ class SQLQueryOperator(BaseSQLOperator):
     def __init__(
         self,
         sql: str,
-        output_table: Optional[Table] = None,
+        output_table: Table,
         source_conn: Optional[str] = None,
         dry_run_flag: bool = False,
         pre_truncate: bool = False,
