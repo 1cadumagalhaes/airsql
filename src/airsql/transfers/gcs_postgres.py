@@ -90,7 +90,7 @@ class GCSToPostgresOperator(BaseOperator):
         self.create_if_empty = create_if_empty
         self.create_if_missing = create_if_missing
         self.source_schema = source_schema
-        self.dry_run = dry_run
+        self._skip_execution = dry_run
         self.audit_cols_to_exclude = audit_cols_to_exclude or {
             'criado_em',
             'atualizado_em',
@@ -391,7 +391,7 @@ class GCSToPostgresOperator(BaseOperator):
                     f'Source is empty and create_if_empty=True. '
                     f'Creating empty table {table_name_full} with inferred schema.'
                 )
-                if not self.dry_run:
+                if not self._skip_execution:
                     self._create_empty_table_from_schema(
                         pg_hook, schema, table_name_simple, df
                     )
@@ -405,7 +405,7 @@ class GCSToPostgresOperator(BaseOperator):
                     f'Table {table_name_full} does not exist and create_if_missing=True. '
                     f'Creating table with inferred schema.'
                 )
-                if not self.dry_run:
+                if not self._skip_execution:
                     self._create_table_from_dataframe(
                         pg_hook, schema, table_name_simple, df
                     )
@@ -467,16 +467,16 @@ class GCSToPostgresOperator(BaseOperator):
         summary = OperationSummary(
             operation_type=operation_type,
             rows_extracted=len(df),
-            rows_loaded=len(df_filtered) if not self.dry_run else 0,
+            rows_loaded=len(df_filtered) if not self._skip_execution else 0,
             duration_seconds=duration,
             file_size_mb=len(file_data) / (1024 * 1024),
             format_used=file_format,
             validation_errors=validation_result.errors,
             validation_warnings=validation_result.warnings,
-            dry_run=self.dry_run,
+            dry_run=self._skip_execution,
         )
 
-        if not self.dry_run:
+        if not self._skip_execution:
             if self.replace:
                 self.log.info(
                     f'Truncating and replacing data in table {table_name_full}'

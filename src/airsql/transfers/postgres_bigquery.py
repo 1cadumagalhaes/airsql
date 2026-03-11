@@ -158,7 +158,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.dataset_location = dataset_location
         self.create_if_empty = create_if_empty
         self.auto_switch_format = auto_switch_format
-        self.dry_run = dry_run
+        self._skip_execution = dry_run
 
         if self.partition_type not in {'DAY', 'HOUR', 'MONTH', 'YEAR'}:
             raise ValueError('partition_type must be one of: DAY, HOUR, MONTH, YEAR')
@@ -202,7 +202,7 @@ class PostgresToBigQueryOperator(BaseOperator):
     def execute(self, context: Context) -> Any:
         """Execute the PostgreSQL to BigQuery transfer."""
 
-        if self.dry_run:
+        if self._skip_execution:
             self.log.info('[DRY RUN] PostgreSQL to BigQuery transfer')
 
         if self.check_source_exists:
@@ -269,7 +269,7 @@ class PostgresToBigQueryOperator(BaseOperator):
             use_copy=self.use_copy,
             use_temp_file=self.use_temp_file,
             auto_switch_format=self.auto_switch_format,
-            dry_run=self.dry_run,
+            dry_run=self._skip_execution,
         )
         actual_gcs_path = pg_to_gcs.execute(context)
 
@@ -281,7 +281,7 @@ class PostgresToBigQueryOperator(BaseOperator):
             getattr(pg_to_gcs, 'schema_filename', None) or actual_schema_filename
         )
 
-        if not self.dry_run:
+        if not self._skip_execution:
             self.log.info(
                 f'Loading data from GCS to BigQuery: {self.destination_table}'
             )

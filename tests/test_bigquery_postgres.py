@@ -320,3 +320,45 @@ class TestGetBqSchema:
         result = op._get_bq_schema(mock_hook)
 
         assert result == {'id': 'INT64', 'value': 'FLOAT64'}
+
+
+class TestCreateIfMissingParameter:
+    def test_create_if_missing_defaults_to_false(self):
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='dataset.table',
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            emit_asset=False,
+        )
+
+        assert op.create_if_missing is False
+
+    def test_create_if_missing_can_be_set(self):
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='dataset.table',
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            create_if_missing=True,
+            emit_asset=False,
+        )
+
+        assert op.create_if_missing is True
+
+    def test_create_if_missing_and_create_if_empty_both_set(self):
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='dataset.table',
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            create_if_missing=True,
+            create_if_empty=True,
+            emit_asset=False,
+        )
+
+        assert op.create_if_missing is True
+        assert op.create_if_empty is True

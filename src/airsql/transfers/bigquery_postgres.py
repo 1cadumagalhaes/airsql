@@ -34,7 +34,10 @@ class BigQueryToPostgresOperator(BaseOperator):
         conflict_columns: Columns for upsert conflict resolution. Optional.
         replace: If True, replace table content. If False and conflict_columns
             provided, perform upsert. Defaults to True.
-        create_if_empty: If True, create empty table when source is empty.
+        create_if_empty: If True, create table when source is empty.
+            Defaults to False.
+        create_if_missing: If True, create table if it doesn't exist.
+            Defaults to False.
         emit_asset: If True, emit Airflow asset for lineage. Defaults to True.
         cleanup_temp_files: If True, delete GCS temp files after load. Defaults to True.
         dry_run: If True, simulate the operation without writing data.
@@ -106,6 +109,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         conflict_columns: Optional[List[str]] = None,
         replace: bool = True,
         create_if_empty: bool = False,
+        create_if_missing: bool = False,
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
         dry_run: bool = False,
@@ -153,9 +157,10 @@ class BigQueryToPostgresOperator(BaseOperator):
         self.conflict_columns = conflict_columns
         self.replace = replace
         self.create_if_empty = create_if_empty
+        self.create_if_missing = create_if_missing
         self.emit_asset = emit_asset
         self.cleanup_temp_files = cleanup_temp_files
-        self.dry_run = dry_run
+        self._skip_execution = dry_run
 
         if self.emit_asset:
             self.outlets = [Asset(f'airsql://database/{self.destination_table}')]
@@ -167,7 +172,7 @@ class BigQueryToPostgresOperator(BaseOperator):
 
         self.log.info(f'airsql version: {__version__}')
 
-        if self.dry_run:
+        if self._skip_execution:
             self.log.info('[DRY RUN] BigQuery to PostgreSQL transfer')
 
         if self.check_source_exists:
@@ -177,7 +182,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         actual_gcs_temp_path = self.gcs_temp_path
         bq_schema = {}
 
-        if not self.dry_run:
+        if not self._skip_execution:
             from airflow.providers.google.cloud.hooks.bigquery import (  # noqa: PLC0415
                 BigQueryHook,
             )
@@ -200,7 +205,7 @@ class BigQueryToPostgresOperator(BaseOperator):
                         '.parquet', '.jsonl'
                     )
 
-        if not self.dry_run:
+        if not self._skip_execution:
             self.log.info(
                 f'Extracting data from BigQuery to GCS: gs://{self.gcs_bucket}/{actual_gcs_temp_path}'
             )
@@ -237,15 +242,16 @@ class BigQueryToPostgresOperator(BaseOperator):
             conflict_columns=self.conflict_columns,
             replace=self.replace,
             create_if_empty=self.create_if_empty,
+            create_if_missing=self.create_if_missing,
             source_schema=bq_schema,
-            dry_run=self.dry_run,
+            dry_run=self._skip_execution,
         )
         gcs_to_pg.execute(context)
 
-        if not self.dry_run and self.cleanup_temp_files:
+        if not self._skip_execution and self.cleanup_temp_files:
             self._cleanup_temp_files(actual_gcs_temp_path)
 
-        if not self.dry_run:
+        if not self._skip_execution:
             self.log.info(
                 f'Successfully transferred data from BigQuery to PostgreSQL table: {self.destination_table}'
             )

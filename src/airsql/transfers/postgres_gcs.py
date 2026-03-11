@@ -332,7 +332,7 @@ class PostgresToGCSOperator(BaseOperator):
         self.sampling_size = sampling_size
         self.sampling_threshold = sampling_threshold
         self.auto_switch_format = auto_switch_format
-        self.dry_run = dry_run
+        self._skip_execution = dry_run
         self.actual_export_format = export_format.lower()
 
         if self.export_format not in {'csv', 'parquet', 'jsonl'}:
@@ -1124,7 +1124,7 @@ class PostgresToGCSOperator(BaseOperator):
             self.log.warning(f'Validation warning: {warning}')
 
         duration = time.time() - start_time
-        rows_loaded = rows_extracted if not self.dry_run else 0
+        rows_loaded = rows_extracted if not self._skip_execution else 0
         summary = OperationSummary(
             operation_type='export',
             rows_extracted=rows_extracted,
@@ -1134,9 +1134,9 @@ class PostgresToGCSOperator(BaseOperator):
             format_used=export_format,
             validation_errors=validation_result.errors,
             validation_warnings=validation_result.warnings,
-            dry_run=self.dry_run,
+            dry_run=self._skip_execution,
         )
-        if not self.dry_run:
+        if not self._skip_execution:
             self.log.info(
                 f'Uploading data as {export_format.upper()} to GCS: gs://{self.bucket}/{self.filename}'
             )
