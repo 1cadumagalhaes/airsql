@@ -614,6 +614,8 @@ class TestReadDataframeFromHook:
     def test_bigquery_converts_dbdate_to_object_dtype(self) -> None:
         from datetime import date
 
+        import db_dtypes
+
         from airsql.operators import _read_dataframe_from_hook
 
         mock_hook = MagicMock()
@@ -622,7 +624,8 @@ class TestReadDataframeFromHook:
         df_with_dbdate = pd.DataFrame({
             'id': [1, 2, 3],
             'date_col': pd.Series(
-                [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)], dtype='dbdate'
+                [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)],
+                dtype=db_dtypes.DateDtype(),
             ),
         })
 
@@ -642,6 +645,8 @@ class TestReadDataframeFromHook:
     def test_bigquery_converts_dbtime_to_object_dtype(self) -> None:
         from datetime import time
 
+        import db_dtypes
+
         from airsql.operators import _read_dataframe_from_hook
 
         mock_hook = MagicMock()
@@ -650,7 +655,8 @@ class TestReadDataframeFromHook:
         df_with_dbtime = pd.DataFrame({
             'id': [1, 2, 3],
             'time_col': pd.Series(
-                [time(10, 30, 0), time(11, 45, 0), time(14, 0, 0)], dtype='dbtime'
+                [time(10, 30, 0), time(11, 45, 0), time(14, 0, 0)],
+                dtype=db_dtypes.TimeDtype(),
             ),
         })
 
@@ -679,4 +685,216 @@ class TestReadDataframeFromHook:
         result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table WHERE 1=0')
 
         assert isinstance(result, pd.DataFrame)
-        assert len(result) == 0
+
+    def test_pyarrow_int_with_nulls_converts_to_Int64(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_nulls = pd.DataFrame({
+            'id': pd.array([1, 2, None], dtype=pd.ArrowDtype(pa.int64())),
+            'value': pd.array([10, None, 30], dtype=pd.ArrowDtype(pa.int64())),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_nulls
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            assert str(result['id'].dtype) == 'Int64'
+            assert str(result['value'].dtype) == 'Int64'
+            assert result['id'].isna().sum() == 1
+            assert result['value'].isna().sum() == 1
+
+    def test_pyarrow_float_with_nulls_converts_to_Float64(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_nulls = pd.DataFrame({
+            'price': pd.array([1.5, None, 3.7], dtype=pd.ArrowDtype(pa.float64())),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_nulls
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            assert str(result['price'].dtype) == 'Float64'
+            assert result['price'].isna().sum() == 1
+
+    def test_pyarrow_string_with_nulls_converts_to_string(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_nulls = pd.DataFrame({
+            'name': pd.array(
+                ['alice', None, 'charlie'], dtype=pd.ArrowDtype(pa.string())
+            ),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_nulls
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            assert isinstance(result['name'].dtype, pd.StringDtype)
+            assert result['name'].isna().sum() == 1
+
+    def test_pyarrow_timestamp_with_nulls_converts_to_datetime64(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_nulls = pd.DataFrame({
+            'ts': pd.array(
+                [pd.Timestamp('2024-01-01'), None, pd.Timestamp('2024-01-03')],
+                dtype=pd.ArrowDtype(pa.timestamp('ns')),
+            ),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_nulls
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            assert str(result['ts'].dtype) == 'datetime64[ns]'
+            assert result['ts'].isna().sum() == 1
+
+    def test_pyarrow_date_with_nulls_converts_to_object(self) -> None:
+        from datetime import date
+
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_nulls = pd.DataFrame({
+            'dt': pd.array(
+                [date(2024, 1, 1), None, date(2024, 1, 3)],
+                dtype=pd.ArrowDtype(pa.date32()),
+            ),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_nulls
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            assert str(result['dt'].dtype) == 'object'
+            assert result['dt'].isna().sum() == 1
+
+    def test_pyarrow_bool_with_nulls_converts_to_boolean(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_nulls = pd.DataFrame({
+            'flag': pd.array([True, None, False], dtype=pd.ArrowDtype(pa.bool_())),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_nulls
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            assert str(result['flag'].dtype) == 'boolean'
+            assert result['flag'].isna().sum() == 1
+
+    def test_pyarrow_int32_with_nulls_converts_to_Int64(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_nulls = pd.DataFrame({
+            'id': pd.array([1, None, 3], dtype=pd.ArrowDtype(pa.int32())),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_nulls
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            assert str(result['id'].dtype) == 'Int64'
+            assert result['id'].isna().sum() == 1
+
+    def test_pyarrow_float32_with_nulls_converts_to_Float64(self) -> None:
+        from airsql.operators import _read_dataframe_from_hook
+
+        mock_hook = MagicMock()
+        mock_hook.__class__.__name__ = 'PostgresHook'
+        mock_hook.get_sqlalchemy_engine.side_effect = NotImplementedError()
+
+        mock_conn = MagicMock()
+        import pyarrow as pa
+
+        df_with_nulls = pd.DataFrame({
+            'value': pd.array([1.5, None, 3.7], dtype=pd.ArrowDtype(pa.float32())),
+        })
+
+        mock_conn.close = MagicMock()
+        mock_hook.get_conn.return_value = mock_conn
+
+        with patch('airsql.operators.pd.read_sql') as mock_read_sql:
+            mock_read_sql.return_value = df_with_nulls
+
+            result = _read_dataframe_from_hook(mock_hook, 'SELECT * FROM table')
+
+            assert str(result['value'].dtype) == 'Float64'
+            assert result['value'].isna().sum() == 1

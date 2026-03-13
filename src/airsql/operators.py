@@ -38,6 +38,14 @@ def _read_dataframe_from_hook(hook: Any, sql: str):
                     df[col] = df[col].astype('datetime64[ns]').dt.date.astype('object')
                 elif pa.types.is_timestamp(arrow_type):
                     df[col] = df[col].astype('datetime64[ns]')
+                elif pa.types.is_integer(arrow_type):
+                    df[col] = df[col].astype('Int64')
+                elif pa.types.is_floating(arrow_type):
+                    df[col] = df[col].astype('Float64')
+                elif pa.types.is_boolean(arrow_type):
+                    df[col] = df[col].astype('boolean')
+                elif pa.types.is_string(arrow_type):
+                    df[col] = df[col].astype('string')
                 else:
                     df[col] = df[col].astype(df[col].dtype.numpy_dtype)
         return df
