@@ -472,9 +472,23 @@ class SQLHookManager:
             create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
         )
         if table.partition_by:
-            job_config.time_partitioning = bigquery.TimePartitioning(
-                field=table.partition_by
-            )
+            from google.cloud.bigquery import TimePartitioningType
+
+            partition_type_map = {
+                'HOUR': TimePartitioningType.HOUR,
+                'DAY': TimePartitioningType.DAY,
+                'MONTH': TimePartitioningType.MONTH,
+                'YEAR': TimePartitioningType.YEAR,
+            }
+            time_partitioning = bigquery.TimePartitioning(field=table.partition_by)
+            if (
+                table.partition_type
+                and table.partition_type.upper() in partition_type_map
+            ):
+                time_partitioning.type_ = partition_type_map[
+                    table.partition_type.upper()
+                ]
+            job_config.time_partitioning = time_partitioning
         if table.cluster_by:
             job_config.clustering_fields = table.cluster_by
         if table.schema_fields:
@@ -508,6 +522,14 @@ class SQLHookManager:
         else:
             schema_name = None
             table_name = table.table_name
+
+        # Handle partitioned table creation
+        if table.postgres_partition_by and if_exists in {'replace', 'fail'}:
+            SQLHookManager._ensure_partitioned_postgres_table(
+                hook, table, df, schema_name, table_name
+            )
+            if_exists = 'append'  # After creating partitioned table, use append
+
         df.to_sql(
             table_name,
             engine,
@@ -571,6 +593,110 @@ class SQLHookManager:
         job.result()
 
     @staticmethod
+    def _ensure_partitioned_postgres_table(
+        hook,
+        table: Table,
+        df: 'pd.DataFrame',
+        schema_name: Optional[str],
+        table_name: str,
+    ) -> None:
+        """Ensure a partitioned PostgreSQL table exists, creating it if necessary.
+
+        Args:
+            hook: PostgresHook instance.
+            table: Table reference with partition configuration.
+            df: DataFrame with data to infer schema from.
+            schema_name: PostgreSQL schema name.
+            table_name: PostgreSQL table name.
+        """
+
+        if not table.postgres_partition_by:
+            return
+
+        conn = hook.get_conn()
+        cursor = conn.cursor()
+
+        try:
+            # Check if table already exists
+            table_exists_sql = """
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = %s AND table_name = %s
+            )
+            """
+            cursor.execute(table_exists_sql, (schema_name or 'public', table_name))
+            table_exists = cursor.fetchone()[0]
+
+            if table_exists:
+                return
+
+            # Determine partition column and type
+            partition_by = table.postgres_partition_by
+            partition_type = table.postgres_partition_type or 'RANGE'
+            partition_expression = table.postgres_partition_expression
+
+            # Build column definitions from DataFrame
+            import pandas as pd  # noqa: PLC0415
+
+            columns_sql = []
+            for col in df.columns:
+                dtype = df[col].dtype
+                if pd.api.types.is_integer_dtype(dtype):
+                    pg_type = 'INTEGER'
+                elif pd.api.types.is_float_dtype(dtype):
+                    pg_type = 'NUMERIC'
+                elif pd.api.types.is_bool_dtype(dtype):
+                    pg_type = 'BOOLEAN'
+                elif pd.api.types.is_datetime64_any_dtype(dtype):
+                    pg_type = 'TIMESTAMP'
+                else:
+                    pg_type = 'TEXT'
+                columns_sql.append(f'"{col}" {pg_type}')
+
+            # Add partition key column if not already present
+            partition_col = (
+                partition_by.split(',')[0].strip()
+                if ',' in partition_by
+                else partition_by
+            )
+            if partition_col not in df.columns and partition_expression is None:
+                # If partition column is not in DataFrame, add it with appropriate type
+                pg_partition_col_type = (
+                    'TIMESTAMP' if partition_type == 'RANGE' else 'TEXT'
+                )
+                columns_sql.append(f'"{partition_col}" {pg_partition_col_type}')
+
+            columns_clause = ', '.join(columns_sql)
+
+            # Build partition clause
+            if partition_expression:
+                partition_clause = (
+                    f'PARTITION BY {partition_type} ({partition_expression})'
+                )
+            else:
+                partition_clause = f'PARTITION BY {partition_type} ({partition_by})'
+
+            # Create the partitioned table
+            full_table_name = (
+                f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            )
+            create_sql = (
+                f'CREATE TABLE {full_table_name} ({columns_clause}) {partition_clause}'
+            )
+
+            logger.info(f'Creating partitioned Postgres table: {create_sql}')
+            cursor.execute(create_sql)
+            conn.commit()
+
+        except Exception as e:
+            conn.rollback()
+            logger.error(f'Failed to create partitioned table: {e}')
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+
+    @staticmethod
     def _replace_postgres_table(df: 'pd.DataFrame', table: Table) -> None:
         """Replace Postgres table content using pandas.to_sql with replace mode.
 
@@ -590,11 +716,35 @@ class SQLHookManager:
             schema_name = None
             table_name = table.table_name
 
+        # Handle partitioned table creation
+        if table.postgres_partition_by:
+            # Check if table exists and drop it
+            conn = hook.get_conn()
+            cursor = conn.cursor()
+            try:
+                full_table_name = (
+                    f'"{schema_name}"."{table_name}"'
+                    if schema_name
+                    else f'"{table_name}"'
+                )
+                cursor.execute(f'DROP TABLE IF EXISTS {full_table_name} CASCADE')
+                conn.commit()
+            finally:
+                cursor.close()
+                conn.close()
+            # Create partitioned table
+            SQLHookManager._ensure_partitioned_postgres_table(
+                hook, table, df, schema_name, table_name
+            )
+            if_exists = 'append'
+        else:
+            if_exists = 'replace'
+
         df.to_sql(
             table_name,
             engine,
             schema=schema_name,
-            if_exists='replace',
+            if_exists=if_exists,
             index=False,
             method='multi',
         )

@@ -29,6 +29,7 @@ except ImportError:
     pass
 
 from airsql.decorators import sql
+from airsql.enums import PostgresPartitionType
 from airsql.file import File
 from airsql.table import Table
 
@@ -44,6 +45,7 @@ __all__ = [
     'sql',
     'Table',
     'File',
+    'PostgresPartitionType',
 ]
 
 

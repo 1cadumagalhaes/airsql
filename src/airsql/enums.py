@@ -86,6 +86,21 @@ class PartitionType(str, Enum):
         return [e.value for e in cls]
 
 
+class PostgresPartitionType(str, Enum):
+    """PostgreSQL partition types.
+
+    Describes supported partition strategies for PostgreSQL tables.
+    """
+
+    RANGE = 'RANGE'
+    LIST = 'LIST'
+    HASH = 'HASH'
+
+    @classmethod
+    def values(cls) -> list[str]:
+        return [e.value for e in cls]
+
+
 class SchemaDetectionMode(str, Enum):
     """Schema detection modes for Postgres to GCS.
 

@@ -46,11 +46,27 @@ class Table(BaseModel):
         description='BigQuery table schema fields. '
         'E.g. [{"name": "col1", "type": "STRING"}]',
     )
-    partition_by: Optional[str] = Field(None, description='BigQuery partition column')
+    partition_by: Optional[str] = Field(
+        None, description='BigQuery time partition column'
+    )
+    partition_type: Optional[str] = Field(
+        None, description='BigQuery time partition type: DAY, HOUR, MONTH, YEAR'
+    )
     cluster_by: List[str] = Field(
         default_factory=list, description='BigQuery clustering columns'
     )
     location: Optional[str] = Field(None, description='BigQuery location/region')
+    postgres_partition_by: Optional[str] = Field(
+        None,
+        description='PostgreSQL partition column(s). Supports single column or tuple for composite keys',
+    )
+    postgres_partition_type: Optional[str] = Field(
+        None, description='PostgreSQL partition type: RANGE, LIST, or HASH'
+    )
+    postgres_partition_expression: Optional[str] = Field(
+        None,
+        description="PostgreSQL partition expression for RANGE partitioning (e.g., 'date_trunc(month, created_at)')",
+    )
     temporary: bool = Field(False, description='Whether this is a temporary table')
     temp_schema: Optional[str] = Field(
         None,
