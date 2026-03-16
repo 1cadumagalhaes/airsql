@@ -362,3 +362,33 @@ class TestCreateIfMissingParameter:
 
         assert op.create_if_missing is True
         assert op.create_if_empty is True
+
+
+class TestPartitionParameters:
+    def test_partition_column_requires_replace_false(self):
+        with pytest.raises(ValueError, match='partition_column requires replace=False'):
+            BigQueryToPostgresOperator(
+                task_id='test',
+                source_project_dataset_table='dataset.table',
+                postgres_conn_id='pg',
+                destination_table='public.table',
+                gcs_bucket='bucket',
+                partition_column='event_date',
+                replace=True,
+                emit_asset=False,
+            )
+
+    def test_partition_parameters_set_correctly(self):
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='dataset.table',
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            partition_column='event_date',
+            replace=False,
+            emit_asset=False,
+        )
+
+        assert op.partition_column == 'event_date'
+        assert op.replace is False

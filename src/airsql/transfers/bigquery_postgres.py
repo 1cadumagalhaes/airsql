@@ -38,6 +38,9 @@ class BigQueryToPostgresOperator(BaseOperator):
             Defaults to False.
         create_if_missing: If True, create table if it doesn't exist.
             Defaults to False.
+        partition_column: Column name for partitioning. When set, creates one
+            partition per unique value in the column. Requires replace=False.
+            Defaults to None.
         emit_asset: If True, emit Airflow asset for lineage. Defaults to True.
         cleanup_temp_files: If True, delete GCS temp files after load. Defaults to True.
         dry_run: If True, simulate the operation without writing data.
@@ -110,6 +113,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         replace: bool = True,
         create_if_empty: bool = False,
         create_if_missing: bool = False,
+        partition_column: Optional[str] = None,
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
         dry_run: bool = False,
@@ -129,6 +133,11 @@ class BigQueryToPostgresOperator(BaseOperator):
             raise ValueError(
                 'where clause cannot be used with sql parameter. '
                 'Include the WHERE condition in your sql query instead.'
+            )
+        if partition_column and replace:
+            raise ValueError(
+                'partition_column requires replace=False. '
+                'Partition exchange is an incremental operation.'
             )
 
         self.source_project_dataset_table = source_project_dataset_table
@@ -158,6 +167,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         self.replace = replace
         self.create_if_empty = create_if_empty
         self.create_if_missing = create_if_missing
+        self.partition_column = partition_column
         self.emit_asset = emit_asset
         self.cleanup_temp_files = cleanup_temp_files
         self._skip_execution = dry_run
@@ -243,6 +253,7 @@ class BigQueryToPostgresOperator(BaseOperator):
             replace=self.replace,
             create_if_empty=self.create_if_empty,
             create_if_missing=self.create_if_missing,
+            partition_column=self.partition_column,
             source_schema=bq_schema,
             dry_run=self._skip_execution,
         )

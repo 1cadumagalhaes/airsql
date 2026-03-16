@@ -409,3 +409,28 @@ class TestCoerceColumnTypes:
         assert result['active'].tolist() == [True, False, True]
         assert result['enabled'].tolist()[0] is True
         assert result['enabled'].tolist()[1] is False
+
+
+class TestPartitionParameters:
+    def test_partition_column_defaults_to_none(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+        )
+        assert op.partition_column is None
+
+    def test_partition_parameters_can_be_set(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            partition_column='event_date',
+        )
+        assert op.partition_column == 'event_date'
