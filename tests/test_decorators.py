@@ -90,6 +90,45 @@ class TestQueryDecorator:
         assert hasattr(op, 'region')
         assert op.region == 'us-east'
 
+    def test_jinja_conditional_with_none_param(self) -> None:
+        @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+        def my_query(dominio: str | None) -> str:
+            return """
+                SELECT * FROM users
+                WHERE active = true
+                {% if dominio %}
+                AND dominio = '{{ dominio }}'
+                {% endif %}
+                ORDER BY id
+            """
+
+        op_no_filter = my_query(dominio=None)
+        assert 'AND dominio' not in op_no_filter.sql
+        assert 'WHERE active = true' in op_no_filter.sql
+
+        op_with_filter = my_query(dominio='instagram')
+        assert "AND dominio = 'instagram'" in op_with_filter.sql
+
+    def test_jinja_conditional_with_empty_string(self) -> None:
+        @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+        def my_query(status: str | None) -> str:
+            return """
+                SELECT * FROM users
+                WHERE active = true
+                {% if status %}
+                AND status = '{{ status }}'
+                {% endif %}
+            """
+
+        op_no_filter = my_query(status=None)
+        assert 'AND status' not in op_no_filter.sql
+
+        op_empty = my_query(status='')
+        assert 'AND status' not in op_empty.sql
+
+        op_with_filter = my_query(status='pending')
+        assert "status = 'pending'" in op_with_filter.sql
+
 
 class TestAppendDecorator:
     def test_is_callable(self) -> None:
