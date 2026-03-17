@@ -3,6 +3,7 @@ SQL decorators for airsql framework with support for SQL files and Jinja templat
 """
 
 import inspect
+import logging
 import os
 from functools import wraps
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from airflow.models import BaseOperator
 from airflow.sdk import get_current_context, task
-from jinja2 import Environment, select_autoescape
+from jinja2 import Environment, Undefined, select_autoescape
 
 from airsql.file import File
 from airsql.table import Table
@@ -18,10 +19,71 @@ from airsql.table import Table
 if TYPE_CHECKING:
     pass
 
+logger = logging.getLogger(__name__)
+
 
 def _get_func_name(func: Any) -> str:
     """Get function name safely for typing."""
     return getattr(func, '__name__', 'unknown')
+
+
+def _render_airflow_templates(
+    value: Any, context: dict, airflow_jinja_env: Environment
+) -> Any:
+    """Render Airflow Jinja templates in values from context params.
+
+    Handles nested dicts, lists, and strings that may contain {{ params.x }}.
+    Returns the original type with templates rendered.
+    Converts 'None' string and empty strings to None for proper airsql conditional handling.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return {
+            k: _render_airflow_templates(v, context, airflow_jinja_env)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _render_airflow_templates(item, context, airflow_jinja_env)
+            for item in value
+        ]
+    if isinstance(value, str):
+        if '{{' in value or '{%' in value:
+            try:
+                rendered = airflow_jinja_env.from_string(value).render(context)
+                if rendered in {'None', ''}:
+                    return None
+                return rendered or None
+            except Exception:
+                return value
+        return value
+    return value
+
+
+def _get_airflow_context() -> dict:
+    """Get Airflow context for Jinja rendering, returns empty dict if not available."""
+    try:
+        context = get_current_context()
+        if context:
+            return {
+                'params': context.get('params', {}),
+                'ds': context.get('ds', ''),
+                'ds_nodash': context.get('ds_nodash', ''),
+                'ts': context.get('ts', ''),
+                'ts_nodash': context.get('ts_nodash', ''),
+                'logical_date': context.get('logical_date'),
+                'data_interval_start': context.get('data_interval_start'),
+                'data_interval_end': context.get('data_interval_end'),
+                'dag': context.get('dag'),
+                'dag_run': context.get('dag_run'),
+                'run_id': context.get('run_id'),
+                'task': context.get('task'),
+                'task_instance': context.get('task_instance'),
+            }
+    except Exception as e:
+        logger.debug('Could not get Airflow context: %s', e)
+    return {}
 
 
 class SQLDecorators:
@@ -108,13 +170,23 @@ class SQLDecorators:
         its string return is treated as a template,
         or a File object's render method is used.
         All runtime arguments to the decorated function are made available to the
-        Jinja template.
+        Jinja template. Airflow context (params, ds, ts, etc.) is also available
+        for direct use in templates like {% if params.username %}.
         """
         final_template_vars = decorator_template_vars.copy()
         sig = inspect.signature(func)
         bound_args = sig.bind_partial(*args, **kwargs)
         bound_args.apply_defaults()
-        final_template_vars.update(bound_args.arguments)
+
+        airflow_context = _get_airflow_context()
+        airflow_jinja_env = Environment(autoescape=False, undefined=Undefined)  # noqa: S701 Airflow templates are already values, not HTML
+
+        for key, value in bound_args.arguments.items():
+            final_template_vars[key] = _render_airflow_templates(
+                value, airflow_context, airflow_jinja_env
+            )
+
+        final_template_vars.update(airflow_context)
 
         if sql_file_template_path:
             return self._load_sql_from_file(

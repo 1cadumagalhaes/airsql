@@ -22,7 +22,7 @@ from tests.fixtures.data import (
 sql = SQLDecorators()
 
 
-class TestQueryDecorator:
+class TestQueryDecorator:  # noqa: PLR0904
     def test_is_callable(self) -> None:
         @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
         def my_query() -> str:
@@ -128,6 +128,257 @@ class TestQueryDecorator:
 
         op_with_filter = my_query(status='pending')
         assert "status = 'pending'" in op_with_filter.sql
+
+    def test_airflow_params_template_rendering(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': 'test_user', 'id_inventario': '123'}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(username: str | None, id_inventario: str | None) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if username %}
+                    AND username = '{{ username }}'
+                    {% endif %}
+                    {% if id_inventario %}
+                    AND id = {{ id_inventario }}
+                    {% endif %}
+                """
+
+            op = my_query(
+                username='{{ params.username }}',
+                id_inventario='{{ params.id_inventario }}',
+            )
+            assert "username = 'test_user'" in op.sql
+            assert 'AND id = 123' in op.sql
+
+    def test_airflow_params_with_none_value(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': None, 'id_inventario': None}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(username: str | None, id_inventario: str | None) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if username %}
+                    AND username = '{{ username }}'
+                    {% endif %}
+                    {% if id_inventario %}
+                    AND id = {{ id_inventario }}
+                    {% endif %}
+                """
+
+            op = my_query(
+                username='{{ params.username }}',
+                id_inventario='{{ params.id_inventario }}',
+            )
+            assert 'AND username' not in op.sql
+            assert 'AND id' not in op.sql
+
+    def test_airflow_params_with_empty_string(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': '', 'id_inventario': ''}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(username: str | None, id_inventario: str | None) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if username %}
+                    AND username = '{{ username }}'
+                    {% endif %}
+                    {% if id_inventario %}
+                    AND id = {{ id_inventario }}
+                    {% endif %}
+                """
+
+            op = my_query(
+                username='{{ params.username }}',
+                id_inventario='{{ params.id_inventario }}',
+            )
+            assert 'AND username' not in op.sql
+            assert 'AND id' not in op.sql
+
+    def test_airflow_params_mixed_values(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': 'instagram', 'id_inventario': None}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(username: str | None, id_inventario: str | None) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if username %}
+                    AND username = '{{ username }}'
+                    {% endif %}
+                    {% if id_inventario %}
+                    AND id = {{ id_inventario }}
+                    {% endif %}
+                """
+
+            op = my_query(
+                username='{{ params.username }}',
+                id_inventario='{{ params.id_inventario }}',
+            )
+            assert "username = 'instagram'" in op.sql
+            assert 'AND id' not in op.sql
+
+    def test_airflow_ds_template(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'ds': '2025-01-15', 'params': {}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(execution_date: str) -> str:
+                return """
+                    SELECT * FROM events
+                    WHERE event_date = '{{ execution_date }}'
+                """
+
+            op = my_query(execution_date='{{ ds }}')
+            assert "event_date = '2025-01-15'" in op.sql
+
+    def test_airflow_params_with_list_values(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'canais': 'instagram,facebook,twitter'}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(canais: str) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE canal IN ({{ canais }})
+                """
+
+            op = my_query(canais='{{ params.canais }}')
+            assert 'canal IN (instagram,facebook,twitter)' in op.sql
+
+    def test_airflow_params_with_dict_values(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {
+            'params': {'filters': {'status': 'active', 'region': 'us-east'}}
+        }
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(status: str, region: str) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE status = '{{ status }}'
+                    AND region = '{{ region }}'
+                """
+
+            op = my_query(
+                status='{{ params.filters.status }}',
+                region='{{ params.filters.region }}',
+            )
+            assert "status = 'active'" in op.sql
+            assert "region = 'us-east'" in op.sql
+
+    def test_airflow_params_static_value_overrides_template(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': 'from_params'}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(username: str) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE username = '{{ username }}'
+                """
+
+            op = my_query(username='static_value')
+            assert "username = 'static_value'" in op.sql
+
+    def test_airflow_params_missing_key_returns_empty_string(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(username: str | None) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if username %}
+                    AND username = '{{ username }}'
+                    {% endif %}
+                """
+
+            op = my_query(username='{{ params.username }}')
+            assert 'AND username' not in op.sql
+
+    def test_airflow_params_direct_access_in_template(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': 'instagram', 'id_inventario': '123'}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query() -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if params.username %}
+                    AND username = '{{ params.username }}'
+                    {% endif %}
+                    {% if params.id_inventario %}
+                    AND id = {{ params.id_inventario }}
+                    {% endif %}
+                """
+
+            op = my_query()
+            assert "username = 'instagram'" in op.sql
+            assert 'AND id = 123' in op.sql
+
+    def test_airflow_params_direct_access_with_none(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': None, 'id_inventario': None}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query() -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if params.username %}
+                    AND username = '{{ params.username }}'
+                    {% endif %}
+                    {% if params.id_inventario %}
+                    AND id = {{ params.id_inventario }}
+                    {% endif %}
+                """
+
+            op = my_query()
+            assert 'AND username' not in op.sql
+            assert 'AND id' not in op.sql
 
 
 class TestAppendDecorator:
