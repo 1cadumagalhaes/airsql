@@ -380,6 +380,57 @@ class TestQueryDecorator:  # noqa: PLR0904
             assert 'AND username' not in op.sql
             assert 'AND id' not in op.sql
 
+    def test_airflow_params_string_none_sanitized(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': 'None', 'id_inventario': 'None'}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query() -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if params.username %}
+                    AND username = '{{ params.username }}'
+                    {% endif %}
+                    {% if params.id_inventario %}
+                    AND id = {{ params.id_inventario }}
+                    {% endif %}
+                """
+
+            op = my_query()
+            assert 'AND username' not in op.sql
+            assert 'AND id' not in op.sql
+
+    def test_airflow_params_via_args_string_none_sanitized(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {'params': {'username': 'None', 'id_inventario': 'None'}}
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query(username: str | None, id_inventario: str | None) -> str:
+                return """
+                    SELECT * FROM users
+                    WHERE active = true
+                    {% if username %}
+                    AND username = '{{ username }}'
+                    {% endif %}
+                    {% if id_inventario %}
+                    AND id = {{ id_inventario }}
+                    {% endif %}
+                """
+
+            op = my_query(
+                username='{{ params.username }}',
+                id_inventario='{{ params.id_inventario }}',
+            )
+            assert 'AND username' not in op.sql
+            assert 'AND id' not in op.sql
+
 
 class TestAppendDecorator:
     def test_is_callable(self) -> None:

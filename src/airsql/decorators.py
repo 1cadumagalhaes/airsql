@@ -61,13 +61,38 @@ def _render_airflow_templates(
     return value
 
 
+def _sanitize_airflow_params(params: dict) -> dict:
+    """Recursively sanitize Airflow params, converting string 'None' to Python None.
+
+    Airflow UI often serializes None as the string 'None' when triggering DAGs.
+    """
+    if not isinstance(params, dict):
+        return params
+
+    sanitized = {}
+    for key, value in params.items():
+        if isinstance(value, dict):
+            sanitized[key] = _sanitize_airflow_params(value)
+        elif isinstance(value, list):
+            sanitized[key] = [
+                _sanitize_airflow_params(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        elif value in {'None', 'null'}:
+            sanitized[key] = None
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
 def _get_airflow_context() -> dict:
     """Get Airflow context for Jinja rendering, returns empty dict if not available."""
     try:
         context = get_current_context()
         if context:
+            params = context.get('params', {})
             return {
-                'params': context.get('params', {}),
+                'params': _sanitize_airflow_params(params) if params else {},
                 'ds': context.get('ds', ''),
                 'ds_nodash': context.get('ds_nodash', ''),
                 'ts': context.get('ts', ''),
