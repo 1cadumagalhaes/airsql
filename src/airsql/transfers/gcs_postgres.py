@@ -891,19 +891,16 @@ class GCSToPostgresOperator(BaseOperator):
             )
 
             temp_table_name = f'_temp_{table_name}_{partition_value_safe}_{abs(hash(partition_value_str))}'
-            full_temp_table = (
-                f'{schema}.{temp_table_name}' if schema else temp_table_name
-            )
 
             conn = pg_hook.get_conn()
             cursor = conn.cursor()
 
             try:
-                cursor.execute(f'DROP TABLE IF EXISTS {full_temp_table}')
+                cursor.execute(f'DROP TABLE IF EXISTS {temp_table_name}')
                 conn.commit()
 
                 cursor.execute(
-                    f'CREATE TEMP TABLE {full_temp_table} '
+                    f'CREATE TEMP TABLE {temp_table_name} '
                     f'(LIKE {full_parent_table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS)'
                 )
                 conn.commit()
@@ -916,7 +913,7 @@ class GCSToPostgresOperator(BaseOperator):
                 df_to_insert.to_sql(
                     name=temp_table_name,
                     con=engine,
-                    schema=schema,
+                    schema=None,
                     if_exists='append',
                     index=False,
                     method='multi',
@@ -961,7 +958,7 @@ class GCSToPostgresOperator(BaseOperator):
 
                 self.log.info(f'Inserting data into partition {full_partition}')
                 cursor.execute(
-                    f'INSERT INTO {full_partition} SELECT * FROM {full_temp_table}'
+                    f'INSERT INTO {full_partition} SELECT * FROM {temp_table_name}'
                 )
 
                 conn.commit()
@@ -974,7 +971,7 @@ class GCSToPostgresOperator(BaseOperator):
                 )
                 raise
             finally:
-                cursor.execute(f'DROP TABLE IF EXISTS {full_temp_table}')
+                cursor.execute(f'DROP TABLE IF EXISTS {temp_table_name}')
                 conn.commit()
             cursor.close()
             conn.close()
