@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
@@ -434,3 +434,63 @@ class TestPartitionParameters:
             partition_column='event_date',
         )
         assert op.partition_column == 'event_date'
+
+
+class TestPartitionExchange:
+    def test_partition_exchange_casts_date_partition_bounds(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            partition_column='event_date',
+            source_schema={'event_date': 'DATE'},
+        )
+        df = pd.DataFrame({
+            'event_date': [pd.Timestamp('2025-02-02').date()],
+            'id': [1],
+        })
+
+        first_cursor = MagicMock()
+        second_cursor = MagicMock()
+        second_cursor.fetchone.return_value = None
+
+        first_conn = MagicMock()
+        first_conn.cursor.return_value = first_cursor
+
+        second_conn = MagicMock()
+        second_conn.cursor.return_value = second_cursor
+
+        mock_hook = MagicMock()
+        mock_hook.get_conn.side_effect = [first_conn, second_conn]
+        mock_hook.get_sqlalchemy_engine.return_value = MagicMock()
+
+        with patch.object(pd.DataFrame, 'to_sql', autospec=True, return_value=None):
+            op._partition_exchange(mock_hook, 'public', 'test_table', df)
+
+        create_partition_calls = [
+            call
+            for call in second_cursor.execute.call_args_list
+            if 'FOR VALUES FROM' in call.args[0]
+        ]
+
+        assert len(create_partition_calls) == 1
+        sql, params = create_partition_calls[0].args
+        assert 'FOR VALUES FROM (%s::DATE) TO (%s::DATE)' in sql
+        assert params == ('2025-02-02', '2025-02-03')
+
+    def test_get_partition_pg_type_uses_source_schema(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            partition_column='event_at',
+            source_schema={'event_at': 'TIMESTAMP'},
+        )
+
+        assert op._get_partition_pg_type() == 'TIMESTAMPTZ'

@@ -1,7 +1,8 @@
+import importlib
 import json
 import time
 from io import BytesIO, StringIO
-from typing import Optional
+from typing import Any, Optional
 
 from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
@@ -386,9 +387,9 @@ class GCSToPostgresOperator(BaseOperator):
         elif file_format == 'jsonl':
             df = pd.read_json(BytesIO(file_data), lines=True, dtype_backend='pyarrow')
         elif file_format == 'avro':
-            from pyarrow import avro  # noqa: PLC0415
-
-            table = avro.read_table(BytesIO(file_data))
+            avro = importlib.import_module('pyarrow.avro')
+            avro_reader: Any = avro
+            table = avro_reader.read_table(BytesIO(file_data))
             df = table.to_pandas()
         else:
             df = pd.read_csv(
@@ -562,8 +563,12 @@ class GCSToPostgresOperator(BaseOperator):
         cursor = conn.cursor()
         sql_mod = _get_sql_module(conn)
         is_psycopg2 = _is_psycopg2_connection(conn)
+        conflict_columns = self.conflict_columns or []
 
         try:
+            if not conflict_columns:
+                raise ValueError('conflict_columns is required for upsert operations')
+
             table_identifier = (
                 sql_mod.Identifier(schema, table_name_simple)
                 if schema
@@ -623,8 +628,12 @@ class GCSToPostgresOperator(BaseOperator):
         cursor = conn.cursor()
         sql_mod = _get_sql_module(conn)
         is_psycopg2 = _is_psycopg2_connection(conn)
+        conflict_columns = self.conflict_columns or []
 
         try:
+            if not conflict_columns:
+                raise ValueError('conflict_columns is required for upsert operations')
+
             table_identifier = (
                 sql_mod.Identifier(schema, table_name_simple)
                 if schema
@@ -633,9 +642,7 @@ class GCSToPostgresOperator(BaseOperator):
 
             insert_cols_ident = [sql_mod.Identifier(col) for col in df_filtered.columns]
 
-            conflict_cols_ident = [
-                sql_mod.Identifier(col) for col in self.conflict_columns
-            ]
+            conflict_cols_ident = [sql_mod.Identifier(col) for col in conflict_columns]
 
             audit_cols_to_exclude = {
                 'criado_em',
@@ -646,7 +653,7 @@ class GCSToPostgresOperator(BaseOperator):
             update_set_cols = [
                 col
                 for col in df_filtered.columns
-                if col not in self.conflict_columns
+                if col not in conflict_columns
                 and col.lower() not in audit_cols_to_exclude
             ]
 
@@ -669,7 +676,7 @@ class GCSToPostgresOperator(BaseOperator):
                 col_names = ', '.join(df_filtered.columns)
                 placeholders = ', '.join(['%s'] * len(df_filtered.columns))
 
-                conflict_col_names = ', '.join(self.conflict_columns)
+                conflict_col_names = ', '.join(conflict_columns)
 
                 if not update_set_cols:
                     update_clause = 'NOTHING'
@@ -872,10 +879,10 @@ class GCSToPostgresOperator(BaseOperator):
             f'{unique_values[:preview_count]}{"..." if len(unique_values) > preview_count else ""}'
         )
 
+        partition_pg_type = self._get_partition_pg_type()
+
         for partition_value in unique_values:
-            partition_value_str = str(partition_value)
-            if hasattr(partition_value, 'strftime'):
-                partition_value_str = partition_value.strftime('%Y-%m-%d')
+            partition_value_str = self._stringify_partition_bound(partition_value)
 
             partition_value_safe = (
                 partition_value_str.replace('-', '').replace(' ', '_').replace(':', '')
@@ -942,7 +949,7 @@ class GCSToPostgresOperator(BaseOperator):
                     cursor.execute(f'DROP TABLE IF EXISTS {full_partition}')
                     conn.commit()
 
-                partition_start = partition_value_str
+                partition_start = self._stringify_partition_bound(partition_value)
                 partition_end = GCSToPostgresOperator._get_next_partition_value(
                     partition_value
                 )
@@ -950,7 +957,7 @@ class GCSToPostgresOperator(BaseOperator):
                 cursor.execute(
                     f"""
                     CREATE TABLE {full_partition} PARTITION OF {full_parent_table}
-                    FOR VALUES FROM (%s) TO (%s)
+                    FOR VALUES FROM (%s::{partition_pg_type}) TO (%s::{partition_pg_type})
                     """,
                     (partition_start, partition_end),
                 )
@@ -977,6 +984,24 @@ class GCSToPostgresOperator(BaseOperator):
             conn.close()
 
     @staticmethod
+    def _stringify_partition_bound(value) -> str:
+        import datetime  # noqa: PLC0415
+
+        if isinstance(value, datetime.datetime):
+            return value.isoformat(sep=' ')
+        if isinstance(value, datetime.date):
+            return value.strftime('%Y-%m-%d')
+        if hasattr(value, 'strftime'):
+            return value.strftime('%Y-%m-%d')
+        return str(value)
+
+    def _get_partition_pg_type(self) -> str:
+        if self.source_schema and self.partition_column in self.source_schema:
+            bq_type = self.source_schema[self.partition_column].upper()
+            return self.BQ_TO_PG_TYPE_MAP.get(bq_type, 'TEXT')
+        return 'DATE'
+
+    @staticmethod
     def _get_next_partition_value(value) -> str:
         """Get the next value for partition boundary (exclusive upper bound).
 
@@ -994,7 +1019,7 @@ class GCSToPostgresOperator(BaseOperator):
         if isinstance(value, (datetime.date, datetime.datetime)):
             if isinstance(value, datetime.datetime):
                 next_val = value + datetime.timedelta(days=1)
-                return next_val.strftime('%Y-%m-%d')
+                return next_val.isoformat(sep=' ')
             next_val = value + datetime.timedelta(days=1)
             return next_val.strftime('%Y-%m-%d')
 
