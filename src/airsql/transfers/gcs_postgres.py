@@ -953,13 +953,15 @@ class GCSToPostgresOperator(BaseOperator):
                 partition_end = GCSToPostgresOperator._get_next_partition_value(
                     partition_value
                 )
+                partition_start_sql = self._quote_sql_literal(partition_start)
+                partition_end_sql = self._quote_sql_literal(partition_end)
 
                 cursor.execute(
                     f"""
                     CREATE TABLE {full_partition} PARTITION OF {full_parent_table}
-                    FOR VALUES FROM (%s::{partition_pg_type}) TO (%s::{partition_pg_type})
-                    """,
-                    (partition_start, partition_end),
+                    FOR VALUES FROM ({partition_start_sql}::{partition_pg_type})
+                    TO ({partition_end_sql}::{partition_pg_type})
+                    """
                 )
                 conn.commit()
 
@@ -1000,6 +1002,10 @@ class GCSToPostgresOperator(BaseOperator):
             bq_type = self.source_schema[self.partition_column].upper()
             return self.BQ_TO_PG_TYPE_MAP.get(bq_type, 'TEXT')
         return 'DATE'
+
+    @staticmethod
+    def _quote_sql_literal(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
 
     @staticmethod
     def _get_next_partition_value(value) -> str:

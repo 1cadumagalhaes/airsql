@@ -477,9 +477,12 @@ class TestPartitionExchange:
         ]
 
         assert len(create_partition_calls) == 1
-        sql, params = create_partition_calls[0].args
-        assert 'FOR VALUES FROM (%s::DATE) TO (%s::DATE)' in sql
-        assert params == ('2025-02-02', '2025-02-03')
+        sql = create_partition_calls[0].args[0]
+        assert "FOR VALUES FROM ('2025-02-02'::DATE)" in sql
+        assert "TO ('2025-02-03'::DATE)" in sql
+
+    def test_quote_sql_literal_escapes_single_quotes(self):
+        assert GCSToPostgresOperator._quote_sql_literal("O'Brien") == "'O''Brien'"
 
     def test_get_partition_pg_type_uses_source_schema(self):
         op = GCSToPostgresOperator(
