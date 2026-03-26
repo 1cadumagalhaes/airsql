@@ -497,3 +497,40 @@ class TestPartitionExchange:
         )
 
         assert op._get_partition_pg_type() == 'TIMESTAMPTZ'
+
+
+class TestGCSObjectResolution:
+    def test_resolve_object_names_returns_single_name_without_wildcard(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='temp/export/data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+        )
+
+        assert op._resolve_object_names(MagicMock()) == ['temp/export/data.parquet']
+
+    def test_resolve_object_names_matches_wildcard_objects(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='temp/export/data-*.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+        )
+        mock_gcs_hook = MagicMock()
+        mock_gcs_hook.list.return_value = [
+            'temp/export/data-000000000001.parquet',
+            'temp/export/ignore.csv',
+            'temp/export/data-000000000000.parquet',
+        ]
+
+        result = op._resolve_object_names(mock_gcs_hook)
+
+        assert result == [
+            'temp/export/data-000000000000.parquet',
+            'temp/export/data-000000000001.parquet',
+        ]

@@ -392,3 +392,67 @@ class TestPartitionParameters:
 
         assert op.partition_column == 'event_date'
         assert op.replace is False
+
+
+class TestQueryExportPaths:
+    def test_get_query_export_path_adds_wildcard_before_extension(self):
+        assert (
+            BigQueryToPostgresOperator._get_query_export_path(
+                'temp/export/data.parquet'
+            )
+            == 'temp/export/data-*.parquet'
+        )
+
+    def test_export_query_to_gcs_uses_wildcard_uri(self):
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='project.dataset.table',
+            where="event_date = DATE('2026-03-25')",
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            emit_asset=False,
+        )
+
+        mock_job_operator = MagicMock()
+        mock_job_operator.execute.return_value = None
+        mock_job_operator_class = MagicMock(return_value=mock_job_operator)
+
+        with patch.dict(
+            'sys.modules',
+            {
+                'airflow.providers.google.cloud.operators.bigquery': MagicMock(
+                    BigQueryInsertJobOperator=mock_job_operator_class
+                )
+            },
+        ):
+            op._export_query_to_gcs({}, 'parquet', 'temp/export/data.parquet')
+
+        export_sql = mock_job_operator_class.call_args[1]['configuration']['query'][
+            'query'
+        ]
+        assert "uri='gs://bucket/temp/export/data-*.parquet'" in export_sql
+
+    def test_cleanup_temp_files_deletes_wildcard_matches(self):
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='project.dataset.table',
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            emit_asset=False,
+        )
+
+        mock_gcs_hook = MagicMock()
+        mock_gcs_hook.list.return_value = [
+            'temp/export/data-000000000000.parquet',
+            'temp/export/data-000000000001.parquet',
+        ]
+
+        with patch(
+            'airflow.providers.google.cloud.hooks.gcs.GCSHook',
+            return_value=mock_gcs_hook,
+        ):
+            op._cleanup_temp_files('temp/export/data-*.parquet')
+
+        assert mock_gcs_hook.delete.call_count == 2

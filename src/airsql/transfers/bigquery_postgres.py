@@ -1,3 +1,4 @@
+import fnmatch
 from typing import Any, List, Optional, Set
 
 from airflow.models import BaseOperator
@@ -190,6 +191,7 @@ class BigQueryToPostgresOperator(BaseOperator):
 
         actual_export_format = self.export_format
         actual_gcs_temp_path = self.gcs_temp_path
+        load_gcs_temp_path = actual_gcs_temp_path
         bq_schema = {}
 
         if not self._skip_execution:
@@ -216,8 +218,11 @@ class BigQueryToPostgresOperator(BaseOperator):
                     )
 
         if not self._skip_execution:
+            if self.sql or self.where:
+                load_gcs_temp_path = self._get_query_export_path(actual_gcs_temp_path)
+
             self.log.info(
-                f'Extracting data from BigQuery to GCS: gs://{self.gcs_bucket}/{actual_gcs_temp_path}'
+                f'Extracting data from BigQuery to GCS: gs://{self.gcs_bucket}/{load_gcs_temp_path}'
             )
 
             if self.sql or self.where:
@@ -234,7 +239,7 @@ class BigQueryToPostgresOperator(BaseOperator):
             )
         else:
             self.log.info(
-                f'[DRY RUN] Would extract data from BigQuery to GCS: gs://{self.gcs_bucket}/{actual_gcs_temp_path}'
+                f'[DRY RUN] Would extract data from BigQuery to GCS: gs://{self.gcs_bucket}/{load_gcs_temp_path}'
             )
             self.log.info(
                 f'[DRY RUN] Would load data from GCS to PostgreSQL: {self.destination_table}'
@@ -246,7 +251,7 @@ class BigQueryToPostgresOperator(BaseOperator):
             task_id=f'{self.task_id}_load',
             target_table_name=self.destination_table,
             bucket_name=self.gcs_bucket,
-            object_name=actual_gcs_temp_path,
+            object_name=load_gcs_temp_path,
             postgres_conn_id=self.postgres_conn_id,
             gcp_conn_id=self.gcp_conn_id,
             conflict_columns=self.conflict_columns,
@@ -260,7 +265,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         gcs_to_pg.execute(context)
 
         if not self._skip_execution and self.cleanup_temp_files:
-            self._cleanup_temp_files(actual_gcs_temp_path)
+            self._cleanup_temp_files(load_gcs_temp_path)
 
         if not self._skip_execution:
             self.log.info(
@@ -287,17 +292,14 @@ class BigQueryToPostgresOperator(BaseOperator):
 
         api_format = self.FORMAT_API_MAP.get(export_format, 'PARQUET')
 
-        bq_to_gcs_kwargs = {
-            'task_id': f'{self.task_id}_extract',
-            'source_project_dataset_table': self.source_table,
-            'destination_cloud_storage_uris': [f'gs://{self.gcs_bucket}/{gcs_path}'],
-            'gcp_conn_id': self.gcp_conn_id,
-            'export_format': api_format,
-        }
-        if export_format == 'csv':
-            bq_to_gcs_kwargs['print_header'] = True
-
-        bq_to_gcs = BigQueryToGCSOperator(**bq_to_gcs_kwargs)
+        bq_to_gcs = BigQueryToGCSOperator(
+            task_id=f'{self.task_id}_extract',
+            source_project_dataset_table=self.source_table,
+            destination_cloud_storage_uris=[f'gs://{self.gcs_bucket}/{gcs_path}'],
+            gcp_conn_id=self.gcp_conn_id,
+            export_format=api_format,
+            print_header=export_format == 'csv',
+        )
         bq_to_gcs.execute(context)
 
     def _export_query_to_gcs(
@@ -310,10 +312,11 @@ class BigQueryToPostgresOperator(BaseOperator):
 
         source_query = self._get_source_query()
         api_format = self.FORMAT_API_MAP.get(export_format, 'PARQUET')
+        export_path = self._get_query_export_path(gcs_path)
 
         export_sql = f"""
         EXPORT DATA OPTIONS(
-            uri='gs://{self.gcs_bucket}/{gcs_path}',
+            uri='gs://{self.gcs_bucket}/{export_path}',
             format='{api_format}'
         ) AS {source_query}
         """
@@ -324,6 +327,17 @@ class BigQueryToPostgresOperator(BaseOperator):
             gcp_conn_id=self.gcp_conn_id,
         )
         job_operator.execute(context)
+
+    @staticmethod
+    def _get_query_export_path(gcs_path: str) -> str:
+        if '*' in gcs_path:
+            return gcs_path
+
+        if '.' not in gcs_path:
+            return f'{gcs_path}-*.data'
+
+        base_path, extension = gcs_path.rsplit('.', 1)
+        return f'{base_path}-*.{extension}'
 
     def _check_source_data(self, context: Context) -> None:
         """Check if source table/query exists and has data."""
@@ -447,7 +461,17 @@ class BigQueryToPostgresOperator(BaseOperator):
                 f'Cleaning up temporary file: gs://{self.gcs_bucket}/{gcs_temp_path}'
             )
             gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
-            gcs_hook.delete(bucket_name=self.gcs_bucket, object_name=gcs_temp_path)
+            if '*' in gcs_temp_path:
+                wildcard_index = gcs_temp_path.index('*')
+                prefix = gcs_temp_path[:wildcard_index]
+                object_names = gcs_hook.list(bucket_name=self.gcs_bucket, prefix=prefix)
+                for object_name in object_names:
+                    if fnmatch.fnmatch(object_name, gcs_temp_path):
+                        gcs_hook.delete(
+                            bucket_name=self.gcs_bucket, object_name=object_name
+                        )
+            else:
+                gcs_hook.delete(bucket_name=self.gcs_bucket, object_name=gcs_temp_path)
             self.log.info('Temporary file cleanup completed')
         except Exception as e:
             self.log.warning(f'Failed to cleanup temporary file: {e}')

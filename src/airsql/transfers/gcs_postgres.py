@@ -1,3 +1,4 @@
+import fnmatch
 import importlib
 import json
 import time
@@ -376,25 +377,11 @@ class GCSToPostgresOperator(BaseOperator):
 
         start_time = time.time()
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
-        file_data = gcs_hook.download(
-            bucket_name=self.bucket_name, object_name=self.object_name
-        )
         pg_hook = PostgresHook(postgres_conn_id=self.postgres_conn_id)
 
         file_format = self._detect_file_format(self.object_name)
-        if file_format == 'parquet':
-            df = pd.read_parquet(BytesIO(file_data), engine='pyarrow')
-        elif file_format == 'jsonl':
-            df = pd.read_json(BytesIO(file_data), lines=True, dtype_backend='pyarrow')
-        elif file_format == 'avro':
-            avro = importlib.import_module('pyarrow.avro')
-            avro_reader: Any = avro
-            table = avro_reader.read_table(BytesIO(file_data))
-            df = table.to_pandas()
-        else:
-            df = pd.read_csv(
-                StringIO(file_data.decode('utf-8')), dtype_backend='pyarrow'
-            )
+        object_names = self._resolve_object_names(gcs_hook)
+        df = self._read_dataframe_from_gcs_objects(gcs_hook, object_names, file_format)
 
         if '.' in self.target_table_name:
             schema, table_name_simple = self.target_table_name.split('.', 1)
@@ -505,7 +492,7 @@ class GCSToPostgresOperator(BaseOperator):
             rows_extracted=len(df),
             rows_loaded=len(df_filtered) if not self._skip_execution else 0,
             duration_seconds=duration,
-            file_size_mb=len(file_data) / (1024 * 1024),
+            file_size_mb=self._get_total_file_size_mb(gcs_hook, object_names),
             format_used=file_format,
             validation_errors=validation_result.errors,
             validation_warnings=validation_result.warnings,
@@ -563,12 +550,8 @@ class GCSToPostgresOperator(BaseOperator):
         cursor = conn.cursor()
         sql_mod = _get_sql_module(conn)
         is_psycopg2 = _is_psycopg2_connection(conn)
-        conflict_columns = self.conflict_columns or []
 
         try:
-            if not conflict_columns:
-                raise ValueError('conflict_columns is required for upsert operations')
-
             table_identifier = (
                 sql_mod.Identifier(schema, table_name_simple)
                 if schema
@@ -725,6 +708,66 @@ class GCSToPostgresOperator(BaseOperator):
         finally:
             cursor.close()
             conn.close()
+
+    def _resolve_object_names(self, gcs_hook) -> list[str]:
+        if '*' not in self.object_name:
+            return [self.object_name]
+
+        wildcard_index = self.object_name.index('*')
+        prefix = self.object_name[:wildcard_index]
+        listed_objects = gcs_hook.list(bucket_name=self.bucket_name, prefix=prefix)
+        matched_objects = sorted(
+            object_name
+            for object_name in listed_objects
+            if fnmatch.fnmatch(object_name, self.object_name)
+        )
+        if not matched_objects:
+            raise FileNotFoundError(
+                f'No objects matched gs://{self.bucket_name}/{self.object_name}'
+            )
+        return matched_objects
+
+    def _read_dataframe_from_gcs_objects(
+        self, gcs_hook, object_names: list[str], file_format: str
+    ):
+        import pandas as pd  # noqa: PLC0415
+
+        dataframes = [
+            self._read_dataframe_from_bytes(
+                gcs_hook.download(
+                    bucket_name=self.bucket_name, object_name=object_name
+                ),
+                file_format,
+            )
+            for object_name in object_names
+        ]
+        if len(dataframes) == 1:
+            return dataframes[0]
+        return pd.concat(dataframes, ignore_index=True)
+
+    @staticmethod
+    def _read_dataframe_from_bytes(file_data: bytes, file_format: str):
+        import pandas as pd  # noqa: PLC0415
+
+        if file_format == 'parquet':
+            return pd.read_parquet(BytesIO(file_data), engine='pyarrow')
+        if file_format == 'jsonl':
+            return pd.read_json(BytesIO(file_data), lines=True, dtype_backend='pyarrow')
+        if file_format == 'avro':
+            avro = importlib.import_module('pyarrow.avro')
+            avro_reader: Any = avro
+            table = avro_reader.read_table(BytesIO(file_data))
+            return table.to_pandas()
+        return pd.read_csv(StringIO(file_data.decode('utf-8')), dtype_backend='pyarrow')
+
+    def _get_total_file_size_mb(self, gcs_hook, object_names: list[str]) -> float:
+        total_size_bytes = sum(
+            len(
+                gcs_hook.download(bucket_name=self.bucket_name, object_name=object_name)
+            )
+            for object_name in object_names
+        )
+        return total_size_bytes / (1024 * 1024)
 
     @staticmethod
     def _detect_json_columns(pg_hook, schema: str, table_name: str) -> set:
