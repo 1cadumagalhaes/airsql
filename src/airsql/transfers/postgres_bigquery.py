@@ -3,7 +3,7 @@ Enhanced PostgreSQL to BigQuery transfer operator with sensor validation
 and asset emission.
 """
 
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Optional
 
 from airflow.models import BaseOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -143,7 +143,8 @@ class PostgresToBigQueryOperator(BaseOperator):
         else:
             file_ext = '.csv'
         self.gcs_temp_path = (
-            gcs_temp_path or f'temp/postgres_to_bq/{self.task_id}/data{file_ext}'
+            gcs_temp_path
+            or f'temp/postgres_to_bq/{self.task_id}/{{{{ ts_nodash }}}}/data{file_ext}'
         )
 
         self.check_source_exists = check_source_exists
@@ -211,8 +212,8 @@ class PostgresToBigQueryOperator(BaseOperator):
         # Detect JSON columns and adjust format if needed
         actual_export_format = self.export_format
         actual_gcs_temp_path = self.gcs_temp_path
-        actual_schema_filename = self.schema_filename or (
-            self.gcs_temp_path + '.schema.json'
+        actual_schema_filename = self.schema_filename or self._get_schema_path(
+            self.gcs_temp_path
         )
 
         # COPY mode produces CSV/JSONL, not parquet
@@ -223,8 +224,8 @@ class PostgresToBigQueryOperator(BaseOperator):
             if json_columns:
                 actual_export_format = 'jsonl'
                 actual_gcs_temp_path = self.gcs_temp_path.replace('.parquet', '.jsonl')
-                actual_schema_filename = self.schema_filename or (
-                    actual_gcs_temp_path + '.schema.json'
+                actual_schema_filename = self.schema_filename or self._get_schema_path(
+                    actual_gcs_temp_path
                 )
                 self.log.info(
                     f'Detected JSON columns: {json_columns}. Using JSONL format.'
@@ -232,8 +233,8 @@ class PostgresToBigQueryOperator(BaseOperator):
             else:
                 actual_export_format = 'csv'
                 actual_gcs_temp_path = self.gcs_temp_path.replace('.parquet', '.csv')
-                actual_schema_filename = self.schema_filename or (
-                    actual_gcs_temp_path + '.schema.json'
+                actual_schema_filename = self.schema_filename or self._get_schema_path(
+                    actual_gcs_temp_path
                 )
                 self.log.info('Using COPY mode: CSV format.')
         elif self.export_format == 'parquet':
@@ -246,8 +247,8 @@ class PostgresToBigQueryOperator(BaseOperator):
                 actual_export_format = 'jsonl'
                 # Change file extension from .parquet to .jsonl
                 actual_gcs_temp_path = self.gcs_temp_path.replace('.parquet', '.jsonl')
-                actual_schema_filename = self.schema_filename or (
-                    actual_gcs_temp_path + '.schema.json'
+                actual_schema_filename = self.schema_filename or self._get_schema_path(
+                    actual_gcs_temp_path
                 )
 
         self.log.info(
@@ -280,6 +281,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         actual_schema_filename = (
             getattr(pg_to_gcs, 'schema_filename', None) or actual_schema_filename
         )
+        actual_gcs_object = actual_gcs_path.replace(f'gs://{self.gcs_bucket}/', '')
 
         if not self._skip_execution:
             self.log.info(
@@ -295,12 +297,10 @@ class PostgresToBigQueryOperator(BaseOperator):
             )
 
             # Build GCSToBigQueryOperator kwargs based on actual format
-            gcs_to_bq_kwargs = {
+            gcs_to_bq_kwargs: dict[str, Any] = {
                 'task_id': f'{self.task_id}_load',
                 'bucket': self.gcs_bucket,
-                'source_objects': [
-                    actual_gcs_path.replace(f'gs://{self.gcs_bucket}/', '')
-                ],
+                'source_objects': [actual_gcs_object],
                 'destination_project_dataset_table': self.destination_table,
                 'gcp_conn_id': self.gcp_conn_id,
                 'write_disposition': self.write_disposition,
@@ -347,7 +347,7 @@ class PostgresToBigQueryOperator(BaseOperator):
             gcs_to_bq.execute(context)
 
             if self.cleanup_temp_files:
-                self._cleanup_temp_files(actual_gcs_temp_path)
+                self._cleanup_temp_files([actual_gcs_object, actual_schema_filename])
 
             self.log.info(
                 f'Successfully transferred data from PostgreSQL to BigQuery table: {self.destination_table}'
@@ -380,21 +380,42 @@ class PostgresToBigQueryOperator(BaseOperator):
         sensor.execute(context)
         self.log.info('Source data validation successful')
 
-    def _cleanup_temp_files(self, temp_path: Optional[str] = None) -> None:
+    @staticmethod
+    def _get_schema_path(gcs_temp_path: str) -> str:
+        return f'{gcs_temp_path}.schema.json'
+
+    def _cleanup_temp_files(
+        self, temp_path: Optional[str | Iterable[str]] = None
+    ) -> None:
         """Clean up temporary files from GCS.
 
         Args:
-            temp_path: The path to clean up. If not provided, uses self.gcs_temp_path.
+            temp_path: Path or paths to clean up. If not provided, uses the
+                default data path and derived schema path.
         """
         from airflow.providers.google.cloud.hooks.gcs import GCSHook  # noqa: PLC0415
 
-        cleanup_path = temp_path or self.gcs_temp_path
+        if temp_path is None:
+            cleanup_paths = [
+                self.gcs_temp_path,
+                self.schema_filename or self._get_schema_path(self.gcs_temp_path),
+            ]
+        elif isinstance(temp_path, str):
+            cleanup_paths = [temp_path]
+        else:
+            cleanup_paths = list(temp_path)
+
+        unique_cleanup_paths = list(
+            dict.fromkeys(path for path in cleanup_paths if path)
+        )
+
         try:
-            self.log.info(
-                f'Cleaning up temporary file: gs://{self.gcs_bucket}/{cleanup_path}'
-            )
             gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
-            gcs_hook.delete(bucket_name=self.gcs_bucket, object_name=cleanup_path)
+            for cleanup_path in unique_cleanup_paths:
+                self.log.info(
+                    f'Cleaning up temporary file: gs://{self.gcs_bucket}/{cleanup_path}'
+                )
+                gcs_hook.delete(bucket_name=self.gcs_bucket, object_name=cleanup_path)
             self.log.info('Temporary file cleanup completed')
         except Exception as e:
             self.log.warning(f'Failed to cleanup temporary file: {e}')
