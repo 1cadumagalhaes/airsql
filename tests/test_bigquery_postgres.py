@@ -55,6 +55,20 @@ class TestBigQueryToPostgresOperatorInit:
                 gcs_bucket='bucket',
             )
 
+    def test_default_gcs_temp_path_uses_run_scoped_directory(self):
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='dataset.table',
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            emit_asset=False,
+        )
+
+        assert (
+            op.gcs_temp_path == 'temp/bq_to_postgres/test/{{ ts_nodash }}/data.parquet'
+        )
+
 
 class TestGetSourceQuery:
     def test_get_source_query_with_table(self):
@@ -432,6 +446,7 @@ class TestQueryExportPaths:
             'query'
         ]
         assert "uri='gs://bucket/temp/export/data-*.parquet'" in export_sql
+        assert 'overwrite=true' in export_sql
 
     def test_cleanup_temp_files_deletes_wildcard_matches(self):
         op = BigQueryToPostgresOperator(

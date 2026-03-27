@@ -160,7 +160,8 @@ class BigQueryToPostgresOperator(BaseOperator):
 
         file_ext = self.FORMAT_EXTENSION_MAP.get(self.export_format, '.parquet')
         self.gcs_temp_path = (
-            gcs_temp_path or f'temp/bq_to_postgres/{self.task_id}/data{file_ext}'
+            gcs_temp_path
+            or f'temp/bq_to_postgres/{self.task_id}/{{{{ ts_nodash }}}}/data{file_ext}'
         )
         self.check_source_exists = check_source_exists
         self.source_table_check_sql = source_table_check_sql
@@ -317,7 +318,8 @@ class BigQueryToPostgresOperator(BaseOperator):
         export_sql = f"""
         EXPORT DATA OPTIONS(
             uri='gs://{self.gcs_bucket}/{export_path}',
-            format='{api_format}'
+            format='{api_format}',
+            overwrite=true
         ) AS {source_query}
         """
 
