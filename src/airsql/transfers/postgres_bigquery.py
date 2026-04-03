@@ -62,7 +62,13 @@ class PostgresToBigQueryOperator(BaseOperator):
         dry_run: If True, simulate the operation without writing data.
     """
 
-    template_fields = ['sql', 'where', 'destination_table', 'gcs_temp_path']
+    template_fields = [
+        'sql',
+        'where',
+        'destination_table',
+        'gcs_temp_path',
+        'write_disposition',
+    ]
     ui_color = '#4285f4'
 
     def __init__(

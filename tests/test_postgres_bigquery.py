@@ -23,6 +23,20 @@ class TestPostgresToBigQueryPaths:
             == 'temp/export/data.csv.schema.json'
         )
 
+    def test_write_disposition_is_listed_in_template_fields(self):
+        op = PostgresToBigQueryOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT * FROM t',
+            gcs_bucket='bucket',
+            destination_project_dataset_table='project.dataset.table',
+            write_disposition="{{ 'WRITE_TRUNCATE' if params.full_refresh else 'WRITE_APPEND' }}",
+            emit_asset=False,
+            check_source_exists=False,
+        )
+
+        assert 'write_disposition' in op.template_fields
+
 
 class TestPostgresToBigQueryCleanup:
     def test_cleanup_temp_files_deletes_data_and_schema_paths(self):
