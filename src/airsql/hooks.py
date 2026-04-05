@@ -978,7 +978,9 @@ WHEN NOT MATCHED THEN
             conn.commit()
 
         except Exception as e:
-            conn.rollback()
+            rollback = getattr(conn, 'rollback', None)
+            if callable(rollback):
+                rollback()
             print(f'Error during Postgres merge: {e}')
             raise
         finally:

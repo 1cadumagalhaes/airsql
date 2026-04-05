@@ -930,6 +930,8 @@ class PostgresToGCSOperator(BaseOperator):
                         table = pa.Table.from_pandas(fixed_chunk, preserve_index=False)
                         if first_chunk:
                             parquet_writer = pq.ParquetWriter(tmp_path, table.schema)
+                        if parquet_writer is None:
+                            raise ValueError('Parquet writer was not initialized')
                         parquet_writer.write_table(table)
                         mime_type = 'application/octet-stream'
 

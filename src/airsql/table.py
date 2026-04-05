@@ -133,7 +133,7 @@ class Table(BaseModel):
                 )
 
             conn = BaseHook.get_connection(self.conn_id)
-            return conn.conn_type.lower() in {'postgres', 'postgresql'}
+            return (conn.conn_type or '').lower() in {'postgres', 'postgresql'}
         except Exception as e:
             logging.getLogger(__name__).warning(
                 f'Failed to check connection type for {self.conn_id}: {e}'

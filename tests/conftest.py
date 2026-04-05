@@ -1,7 +1,8 @@
 import logging
 import sys
+from collections.abc import Generator
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -16,15 +17,16 @@ class _MockAsset:
 
 
 @pytest.fixture(autouse=True)
-def mock_table_asset() -> None:
+def mock_table_asset() -> Generator[None, None, None]:
     original_as_asset = Table.as_asset
 
     def mock_as_asset(self) -> _MockAsset:
         return _MockAsset(uri=self.get_asset_uri())
 
-    Table.as_asset = mock_as_asset
+    table_cls = cast(Any, Table)
+    table_cls.as_asset = mock_as_asset
     yield
-    Table.as_asset = original_as_asset
+    table_cls.as_asset = original_as_asset
 
 
 class _Connection:
@@ -211,7 +213,7 @@ _make_module(
 
 
 @pytest.fixture
-def mock_hook_manager() -> MagicMock:
+def mock_hook_manager() -> Generator[MagicMock, None, None]:
     with patch('airsql.operators.SQLHookManager') as mock:
         instance = MagicMock()
         mock.return_value = instance

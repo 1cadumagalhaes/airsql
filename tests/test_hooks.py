@@ -126,27 +126,26 @@ class TestTruncatePostgresTableIfExists:
         mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
         mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
 
-        original_method = SQLHookManager._table_exists_postgres
         called_with = []
 
         def track_call(hook, tbl):
             called_with.append((hook, tbl))
             return True
 
-        SQLHookManager._table_exists_postgres = staticmethod(track_call)
+        mock_hook = MagicMock()
+        mock_hook.get_sqlalchemy_engine.return_value = mock_engine
+        mock_hook.get_first.return_value = (True,)
 
-        try:
-            mock_hook = MagicMock()
-            mock_hook.get_sqlalchemy_engine.return_value = mock_engine
-            mock_hook.get_first.return_value = (True,)
+        with (
+            patch.object(SQLHookManager, 'get_hook', return_value=mock_hook),
+            patch.object(
+                SQLHookManager, '_table_exists_postgres', side_effect=track_call
+            ),
+        ):
+            SQLHookManager._truncate_postgres_table(df, table)
 
-            with patch.object(SQLHookManager, 'get_hook', return_value=mock_hook):
-                SQLHookManager._truncate_postgres_table(df, table)
-
-            assert len(called_with) == 1
-            assert called_with[0][1] == table
-        finally:
-            SQLHookManager._table_exists_postgres = original_method
+        assert len(called_with) == 1
+        assert called_with[0][1] == table
 
     def test_creates_table_when_not_exists_does_not_truncate(self):
         import pandas as pd
@@ -160,28 +159,27 @@ class TestTruncatePostgresTableIfExists:
         mock_engine.begin.return_value.__enter__ = MagicMock(return_value=mock_conn)
         mock_engine.begin.return_value.__exit__ = MagicMock(return_value=False)
 
-        original_method = SQLHookManager._table_exists_postgres
         called_with = []
 
         def track_call(hook, tbl):
             called_with.append((hook, tbl))
             return False
 
-        SQLHookManager._table_exists_postgres = staticmethod(track_call)
+        mock_hook = MagicMock()
+        mock_hook.get_sqlalchemy_engine.return_value = mock_engine
+        mock_hook.get_first.return_value = (False,)
 
-        try:
-            mock_hook = MagicMock()
-            mock_hook.get_sqlalchemy_engine.return_value = mock_engine
-            mock_hook.get_first.return_value = (False,)
+        with (
+            patch.object(SQLHookManager, 'get_hook', return_value=mock_hook),
+            patch.object(
+                SQLHookManager, '_table_exists_postgres', side_effect=track_call
+            ),
+        ):
+            SQLHookManager._truncate_postgres_table(df, table)
 
-            with patch.object(SQLHookManager, 'get_hook', return_value=mock_hook):
-                SQLHookManager._truncate_postgres_table(df, table)
-
-            assert len(called_with) == 1
-            assert called_with[0][1] == table
-            assert not mock_conn.execute.called
-        finally:
-            SQLHookManager._table_exists_postgres = original_method
+        assert len(called_with) == 1
+        assert called_with[0][1] == table
+        assert not mock_conn.execute.called
 
 
 class TestPartitionedPostgresTable:

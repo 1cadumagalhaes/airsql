@@ -117,6 +117,9 @@ class BaseSQLOperator(BaseOperator):
             for key, value in dynamic_params.items():
                 setattr(self, key, value)
 
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(name)
+
 
 class SQLQueryOperator(BaseSQLOperator):
     """Operator for SQL queries that write to a destination table.
@@ -127,7 +130,7 @@ class SQLQueryOperator(BaseSQLOperator):
     def __init__(
         self,
         sql: str,
-        output_table: Table,
+        output_table: Table | None,
         source_conn: Optional[str] = None,
         dry_run_flag: bool = False,
         pre_truncate: bool = False,
@@ -148,7 +151,7 @@ class SQLQueryOperator(BaseSQLOperator):
         self.is_dry_run = dry_run_flag
         self.pre_truncate = pre_truncate
 
-    def execute(self, context: Context) -> str:
+    def execute(self, context: Any) -> str:
         """Execute the SQL query and write to the output table.
 
         Args:
@@ -161,6 +164,10 @@ class SQLQueryOperator(BaseSQLOperator):
         self.log.info(f'Executing SQL query to write to {self.output_table}')
         self.log.debug(f'SQL Query: {self.sql}')
         if self.source_conn:
+            if self.output_table is None:
+                raise ValueError(
+                    'output_table is required for SQLQueryOperator execution'
+                )
             hook = self.hook_manager.get_hook(self.source_conn)
             df = _read_dataframe_from_hook(hook, self.sql)
 
@@ -223,7 +230,7 @@ class SQLAppendOperator(BaseSQLOperator):
         self.output_table = output_table
         self.is_dry_run = dry_run_flag
 
-    def execute(self, context: Context) -> str:
+    def execute(self, context: Any) -> str:
         """Execute the SQL query and append to the output table.
 
         Args:
@@ -278,7 +285,7 @@ class SQLAppendOperator(BaseSQLOperator):
 class SQLDataFrameOperator(BaseSQLOperator):
     """Operator for SQL queries that return a pandas DataFrame."""
 
-    def execute(self, context: Context) -> pd.DataFrame:
+    def execute(self, context: Any) -> pd.DataFrame:
         """Execute the SQL query and return a pandas DataFrame.
 
         Args:
@@ -333,7 +340,7 @@ class SQLReplaceOperator(BaseSQLOperator):
         self.output_table = output_table
         self.is_dry_run = dry_run_flag
 
-    def execute(self, context: Context) -> str:
+    def execute(self, context: Any) -> str:
         """Execute the SQL query and replace the output table.
 
         Args:
@@ -396,7 +403,7 @@ class SQLTruncateOperator(BaseSQLOperator):
         self.output_table = output_table
         self.is_dry_run = dry_run_flag
 
-    def execute(self, context: Context) -> str:
+    def execute(self, context: Any) -> str:
         """Execute the SQL query and truncate/reload the output table.
 
         Args:
@@ -484,7 +491,7 @@ class SQLMergeOperator(BaseSQLOperator):
         self.pre_truncate = pre_truncate
         self.is_dry_run = dry_run_flag
 
-    def execute(self, context: Context) -> Any:
+    def execute(self, context: Any) -> Any:
         """Execute the SQL query and merge into the output table.
 
         Args:
@@ -591,7 +598,7 @@ class DataFrameLoadOperator(BaseOperator):
             if not hasattr(self, key):
                 setattr(self, key, value)
 
-    def execute(self, context: Context) -> None:
+    def execute(self, context: Any) -> None:
         """Execute the DataFrame load operation.
 
         Args:
@@ -679,7 +686,7 @@ class DataFrameMergeOperator(BaseOperator):
             if not hasattr(self, key):
                 setattr(self, key, value)
 
-    def execute(self, context: Context) -> None:
+    def execute(self, context: Any) -> None:
         """Execute the DataFrame merge operation.
 
         Args:

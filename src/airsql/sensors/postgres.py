@@ -35,7 +35,8 @@ class PostgresSqlSensor(SqlSensor):
         """
         self.poke_count += 1
         super_poke = super().poke(context)
-        if not super_poke and self.poke_count > self.retries:
+        retries = self.retries if isinstance(self.retries, int) else 0
+        if not super_poke and self.poke_count > retries:
             raise AirflowSkipException('Skipping task because poke returned False.')
         return super_poke
 
