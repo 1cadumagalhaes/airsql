@@ -1036,10 +1036,10 @@ class GCSToPostgresOperator(BaseOperator):
     def _build_partition_temp_table_name(
         cls, table_name: str, partition_value_safe: str, partition_value_str: str
     ) -> str:
-        hash_suffix = hashlib.sha1(partition_value_str.encode('utf-8')).hexdigest()[:12]
+        hash_suffix = hashlib.sha1(partition_value_str.encode('utf-8')).hexdigest()[:12]  # noqa: S324
         suffix = f'_{hash_suffix}'
-        max_base_length = cls.POSTGRES_IDENTIFIER_MAX_LENGTH - len('_temp_') - len(
-            suffix
+        max_base_length = (
+            cls.POSTGRES_IDENTIFIER_MAX_LENGTH - len('_temp_') - len(suffix)
         )
         combined_name = f'{table_name}_{partition_value_safe}'
         truncated_name = combined_name[:max_base_length]
