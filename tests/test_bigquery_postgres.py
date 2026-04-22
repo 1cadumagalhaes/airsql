@@ -64,10 +64,13 @@ class TestBigQueryToPostgresOperatorInit:
             gcs_bucket='bucket',
             emit_asset=False,
         )
-
-        assert (
-            op.gcs_temp_path == 'temp/bq_to_postgres/test/{{ ts_nodash }}/data.parquet'
+        expected_path = (
+            "temp/bq_to_postgres/test/"
+            "{{ run_id | replace(':', '_') | replace('+', '_') }}"
+            '/data.parquet'
         )
+
+        assert op.gcs_temp_path == expected_path
 
 
 class TestGetSourceQuery:

@@ -159,9 +159,12 @@ class BigQueryToPostgresOperator(BaseOperator):
             )
 
         file_ext = self.FORMAT_EXTENSION_MAP.get(self.export_format, '.parquet')
+        sanitized_run_id = (
+            "{{ run_id | replace(':', '_') | replace('+', '_') }}"
+        )
         self.gcs_temp_path = (
             gcs_temp_path
-            or f'temp/bq_to_postgres/{self.task_id}/{{{{ ts_nodash }}}}/data{file_ext}'
+            or f'temp/bq_to_postgres/{self.task_id}/{sanitized_run_id}/data{file_ext}'
         )
         self.check_source_exists = check_source_exists
         self.source_table_check_sql = source_table_check_sql

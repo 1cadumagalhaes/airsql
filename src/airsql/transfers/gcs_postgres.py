@@ -1,4 +1,5 @@
 import fnmatch
+import hashlib
 import importlib
 import json
 import time
@@ -81,6 +82,7 @@ class GCSToPostgresOperator(BaseOperator):
         'TIMESTAMP': 'TIMESTAMPTZ',
         'JSON': 'JSONB',
     }
+    POSTGRES_IDENTIFIER_MAX_LENGTH = 63
 
     def __init__(
         self,
@@ -940,7 +942,9 @@ class GCSToPostgresOperator(BaseOperator):
                 f'Processing partition {partition_name} with {len(df_partition)} rows'
             )
 
-            temp_table_name = f'_temp_{table_name}_{partition_value_safe}_{abs(hash(partition_value_str))}'
+            temp_table_name = self._build_partition_temp_table_name(
+                table_name, partition_value_safe, partition_value_str
+            )
 
             conn = pg_hook.get_conn()
             cursor = conn.cursor()
@@ -1027,6 +1031,19 @@ class GCSToPostgresOperator(BaseOperator):
                 conn.commit()
             cursor.close()
             conn.close()
+
+    @classmethod
+    def _build_partition_temp_table_name(
+        cls, table_name: str, partition_value_safe: str, partition_value_str: str
+    ) -> str:
+        hash_suffix = hashlib.sha1(partition_value_str.encode('utf-8')).hexdigest()[:12]
+        suffix = f'_{hash_suffix}'
+        max_base_length = cls.POSTGRES_IDENTIFIER_MAX_LENGTH - len('_temp_') - len(
+            suffix
+        )
+        combined_name = f'{table_name}_{partition_value_safe}'
+        truncated_name = combined_name[:max_base_length]
+        return f'_temp_{truncated_name}{suffix}'
 
     @staticmethod
     def _stringify_partition_bound(value) -> str:

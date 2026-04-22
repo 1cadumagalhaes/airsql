@@ -437,6 +437,30 @@ class TestPartitionParameters:
 
 
 class TestPartitionExchange:
+    def test_build_partition_temp_table_name_stays_within_postgres_limit(self):
+        temp_table_name = GCSToPostgresOperator._build_partition_temp_table_name(
+            'social_audience_demographics_v2',
+            '20250202010203000000',
+            '2025-02-02 01:02:03+00:00',
+        )
+        same_temp_table_name = GCSToPostgresOperator._build_partition_temp_table_name(
+            'social_audience_demographics_v2',
+            '20250202010203000000',
+            '2025-02-02 01:02:03+00:00',
+        )
+        other_temp_table_name = (
+            GCSToPostgresOperator._build_partition_temp_table_name(
+                'social_audience_demographics_v2',
+                '20250203010203000000',
+                '2025-02-03 01:02:03+00:00',
+            )
+        )
+
+        assert len(temp_table_name) <= 63
+        assert temp_table_name.startswith('_temp_social_audience_demographics_v2_')
+        assert temp_table_name == same_temp_table_name
+        assert temp_table_name != other_temp_table_name
+
     def test_partition_exchange_casts_date_partition_bounds(self):
         op = GCSToPostgresOperator(
             task_id='test',
@@ -480,6 +504,46 @@ class TestPartitionExchange:
         sql = create_partition_calls[0].args[0]
         assert "FOR VALUES FROM ('2025-02-02'::DATE)" in sql
         assert "TO ('2025-02-03'::DATE)" in sql
+
+    def test_partition_exchange_uses_bounded_temp_table_name(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            partition_column='event_date',
+        )
+        df = pd.DataFrame({
+            'event_date': [pd.Timestamp('2025-02-02 01:02:03+00:00')],
+            'id': [1],
+        })
+
+        first_cursor = MagicMock()
+        second_cursor = MagicMock()
+        second_cursor.fetchone.return_value = None
+
+        first_conn = MagicMock()
+        first_conn.cursor.return_value = first_cursor
+
+        second_conn = MagicMock()
+        second_conn.cursor.return_value = second_cursor
+
+        mock_hook = MagicMock()
+        mock_hook.get_conn.side_effect = [first_conn, second_conn]
+        mock_hook.get_sqlalchemy_engine.return_value = MagicMock()
+
+        with patch.object(
+            pd.DataFrame, 'to_sql', autospec=True, return_value=None
+        ) as mock_to_sql:
+            op._partition_exchange(
+                mock_hook, 'public', 'social_audience_demographics_v2', df
+            )
+
+        temp_table_name = mock_to_sql.call_args.kwargs['name']
+        assert len(temp_table_name) <= 63
+        assert temp_table_name.startswith('_temp_social_audience_demographics_v2_')
 
     def test_quote_sql_literal_escapes_single_quotes(self):
         assert GCSToPostgresOperator._quote_sql_literal("O'Brien") == "'O''Brien'"
