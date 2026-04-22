@@ -65,7 +65,7 @@ class TestBigQueryToPostgresOperatorInit:
             emit_asset=False,
         )
         expected_path = (
-            "temp/bq_to_postgres/test/"
+            'temp/bq_to_postgres/test/'
             "{{ run_id | replace(':', '_') | replace('+', '_') }}"
             '/data.parquet'
         )

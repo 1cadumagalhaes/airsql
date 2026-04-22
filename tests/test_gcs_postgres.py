@@ -448,12 +448,10 @@ class TestPartitionExchange:
             '20250202010203000000',
             '2025-02-02 01:02:03+00:00',
         )
-        other_temp_table_name = (
-            GCSToPostgresOperator._build_partition_temp_table_name(
-                'social_audience_demographics_v2',
-                '20250203010203000000',
-                '2025-02-03 01:02:03+00:00',
-            )
+        other_temp_table_name = GCSToPostgresOperator._build_partition_temp_table_name(
+            'social_audience_demographics_v2',
+            '20250203010203000000',
+            '2025-02-03 01:02:03+00:00',
         )
 
         assert len(temp_table_name) <= 63
