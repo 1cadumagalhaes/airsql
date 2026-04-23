@@ -204,6 +204,57 @@ class TestCreateIfEmptyParameter:
         assert op.create_if_empty is True
 
 
+class TestPostgresTypeResolution:
+    def test_resolve_postgres_column_type_prefers_explicit_override(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='test.jsonl',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+            source_schema={'followers_count': 'INT64'},
+            postgres_type_overrides={'followers_count': 'NUMERIC(20,0)'},
+        )
+
+        assert (
+            op._resolve_postgres_column_type('followers_count', default='TEXT')
+            == 'NUMERIC(20,0)'
+        )
+
+    def test_resolve_postgres_column_type_uses_bq_mapping_before_fallback(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='test.jsonl',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+            source_schema={'followers_count': 'INT64'},
+        )
+
+        assert op._resolve_postgres_column_type('followers_count') == 'INTEGER'
+
+    def test_resolve_postgres_column_type_uses_json_inference_before_text_fallback(
+        self,
+    ):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='test.jsonl',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+        )
+
+        assert (
+            op._resolve_postgres_column_type(
+                'metadata', default='TEXT', is_json_column=True
+            )
+            == 'JSONB'
+        )
+
+
 class TestCoerceColumnTypes:
     """Test _coerce_column_types for BigQuery float-to-integer conversion."""
 
@@ -559,6 +610,21 @@ class TestPartitionExchange:
         )
 
         assert op._get_partition_pg_type() == 'TIMESTAMPTZ'
+
+    def test_get_partition_pg_type_prefers_override(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            partition_column='followers_count',
+            source_schema={'followers_count': 'INT64'},
+            postgres_type_overrides={'followers_count': 'NUMERIC(20,0)'},
+        )
+
+        assert op._get_partition_pg_type() == 'NUMERIC(20,0)'
 
 
 class TestGCSObjectResolution:

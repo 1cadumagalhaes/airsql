@@ -32,6 +32,7 @@ import_data = GCSToPostgresOperator(
 | `create_if_empty` | `bool` | No | Create empty table if source empty |
 | `grant_table_privileges` | `bool` | No | Grant ALL privileges to PUBLIC (default: True) |
 | `source_schema` | `dict` | No | Source column types for type coercion |
+| `postgres_type_overrides` | `dict[str, str]` | No | Per-column PostgreSQL type hints used when creating destination tables |
 | `dry_run` | `bool` | No | Simulate without writing |
 
 ## Examples
@@ -138,6 +139,30 @@ import_task = GCSToPostgresOperator(
         'amount': 'FLOAT',
         'created_at': 'TIMESTAMP'
     }
+)
+```
+
+### With PostgreSQL Type Overrides
+
+Use `postgres_type_overrides` to force specific column types when
+`create_if_missing` or `create_if_empty` needs to build the target table.
+
+```python
+import_task = GCSToPostgresOperator(
+    task_id='import_with_type_hints',
+    bucket_name='data-bucket',
+    object_name='exports/data.parquet',
+    target_table_name='public.data',
+    postgres_conn_id='postgres_default',
+    create_if_missing=True,
+    source_schema={
+        'followers_count': 'INT64',
+        'account_views_count': 'INT64',
+    },
+    postgres_type_overrides={
+        'followers_count': 'BIGINT',
+        'account_views_count': 'BIGINT',
+    },
 )
 ```
 

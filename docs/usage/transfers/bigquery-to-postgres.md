@@ -32,6 +32,7 @@ transfer = BigQueryToPostgresOperator(
 | `replace` | `bool` | No | Replace table content (default: True) |
 | `check_source_exists` | `bool` | No | Validate source exists (default: True) |
 | `auto_detect_json_columns` | `bool` | No | Auto-detect JSON columns (default: True) |
+| `postgres_type_overrides` | `dict[str, str]` | No | Per-column PostgreSQL type hints used when creating destination tables |
 | `cleanup_temp_files` | `bool` | No | Clean up GCS temp files (default: True) |
 | `dry_run` | `bool` | No | Simulate without writing (default: False) |
 
@@ -99,6 +100,26 @@ transfer = BigQueryToPostgresOperator(
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
     create_if_empty=True
+)
+```
+
+### Override PostgreSQL Types
+
+Use `postgres_type_overrides` when inferred table creation needs an explicit
+PostgreSQL type for specific columns.
+
+```python
+transfer = BigQueryToPostgresOperator(
+    task_id='transfer_with_type_hints',
+    source_project_dataset_table='my-project.dataset.accounts',
+    destination_table='staging.accounts',
+    postgres_conn_id='postgres_default',
+    gcs_bucket='temp-bucket',
+    create_if_missing=True,
+    postgres_type_overrides={
+        'followers_count': 'BIGINT',
+        'account_views_count': 'BIGINT',
+    },
 )
 ```
 

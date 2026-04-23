@@ -72,6 +72,20 @@ class TestBigQueryToPostgresOperatorInit:
 
         assert op.gcs_temp_path == expected_path
 
+    def test_stores_postgres_type_overrides(self):
+        overrides = {'followers_count': 'BIGINT'}
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='dataset.table',
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            postgres_type_overrides=overrides,
+            emit_asset=False,
+        )
+
+        assert op.postgres_type_overrides == overrides
+
 
 class TestGetSourceQuery:
     def test_get_source_query_with_table(self):
@@ -474,3 +488,38 @@ class TestQueryExportPaths:
             op._cleanup_temp_files('temp/export/data-*.parquet')
 
         assert mock_gcs_hook.delete.call_count == 2
+
+
+class TestExecuteParameterForwarding:
+    def test_execute_passes_postgres_type_overrides_to_gcs_loader(self):
+        overrides = {'followers_count': 'BIGINT'}
+        op = BigQueryToPostgresOperator(
+            task_id='test',
+            source_project_dataset_table='project.dataset.table',
+            postgres_conn_id='pg',
+            destination_table='public.table',
+            gcs_bucket='bucket',
+            check_source_exists=False,
+            cleanup_temp_files=False,
+            dry_run=True,
+            postgres_type_overrides=overrides,
+            emit_asset=False,
+        )
+
+        mock_loader = MagicMock()
+        mock_loader.execute.return_value = None
+        mock_loader_class = MagicMock(return_value=mock_loader)
+
+        with patch.dict(
+            'sys.modules',
+            {
+                'airsql.transfers.gcs_postgres': MagicMock(
+                    GCSToPostgresOperator=mock_loader_class
+                )
+            },
+        ):
+            op.execute({})
+
+        assert (
+            mock_loader_class.call_args.kwargs['postgres_type_overrides'] == overrides
+        )

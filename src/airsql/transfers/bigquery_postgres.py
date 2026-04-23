@@ -42,6 +42,8 @@ class BigQueryToPostgresOperator(BaseOperator):
         partition_column: Column name for partitioning. When set, creates one
             partition per unique value in the column. Requires replace=False.
             Defaults to None.
+        postgres_type_overrides: Per-column PostgreSQL type hints used when
+            creating destination tables. Optional.
         emit_asset: If True, emit Airflow asset for lineage. Defaults to True.
         cleanup_temp_files: If True, delete GCS temp files after load. Defaults to True.
         dry_run: If True, simulate the operation without writing data.
@@ -115,6 +117,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         create_if_empty: bool = False,
         create_if_missing: bool = False,
         partition_column: Optional[str] = None,
+        postgres_type_overrides: Optional[dict] = None,
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
         dry_run: bool = False,
@@ -171,6 +174,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         self.create_if_empty = create_if_empty
         self.create_if_missing = create_if_missing
         self.partition_column = partition_column
+        self.postgres_type_overrides = postgres_type_overrides or {}
         self.emit_asset = emit_asset
         self.cleanup_temp_files = cleanup_temp_files
         self._skip_execution = dry_run
@@ -262,6 +266,7 @@ class BigQueryToPostgresOperator(BaseOperator):
             create_if_missing=self.create_if_missing,
             partition_column=self.partition_column,
             source_schema=bq_schema,
+            postgres_type_overrides=self.postgres_type_overrides,
             dry_run=self._skip_execution,
         )
         gcs_to_pg.execute(context)

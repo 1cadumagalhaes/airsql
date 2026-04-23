@@ -60,6 +60,8 @@ class GCSToPostgresOperator(BaseOperator):
             partition per unique value in the column. Requires replace=False.
             Defaults to None.
         source_schema: Source column types for type coercion. Optional.
+        postgres_type_overrides: Per-column PostgreSQL type hints used when
+            creating destination tables. Optional.
         audit_cols_to_exclude: Columns to exclude from updates during upsert.
         dry_run: If True, simulate the operation without writing data.
     """
@@ -98,6 +100,7 @@ class GCSToPostgresOperator(BaseOperator):
         create_if_missing: bool = False,
         partition_column: Optional[str] = None,
         source_schema: Optional[dict] = None,
+        postgres_type_overrides: Optional[dict] = None,
         audit_cols_to_exclude=None,
         dry_run: bool = False,
         *args,
@@ -116,6 +119,7 @@ class GCSToPostgresOperator(BaseOperator):
         self.create_if_missing = create_if_missing
         self.partition_column = partition_column
         self.source_schema = source_schema
+        self.postgres_type_overrides = postgres_type_overrides or {}
         self._skip_execution = dry_run
         self.audit_cols_to_exclude = audit_cols_to_exclude or {
             'criado_em',
@@ -879,15 +883,7 @@ class GCSToPostgresOperator(BaseOperator):
             table_name: Table name
             df: DataFrame with schema to use (can be empty)
         """
-        engine = pg_hook.get_sqlalchemy_engine()
-        empty_df = df.iloc[0:0] if len(df) > 0 else df
-        empty_df.to_sql(
-            name=table_name,
-            con=engine,
-            schema=schema,
-            if_exists='fail',
-            index=False,
-        )
+        self._create_table_from_dataframe(pg_hook, schema, table_name, df.iloc[0:0])
         self.log.info(f'Created empty table {schema}.{table_name}')
 
         if self.grant_table_privileges:
@@ -1058,10 +1054,22 @@ class GCSToPostgresOperator(BaseOperator):
         return str(value)
 
     def _get_partition_pg_type(self) -> str:
-        if self.source_schema and self.partition_column in self.source_schema:
-            bq_type = self.source_schema[self.partition_column].upper()
-            return self.BQ_TO_PG_TYPE_MAP.get(bq_type, 'TEXT')
-        return 'DATE'
+        return self._resolve_postgres_column_type(self.partition_column, default='DATE')
+
+    def _resolve_postgres_column_type(
+        self, column_name: str, default: str = 'TEXT', is_json_column: bool = False
+    ) -> str:
+        if column_name in self.postgres_type_overrides:
+            return self.postgres_type_overrides[column_name]
+
+        if self.source_schema and column_name in self.source_schema:
+            bq_type = self.source_schema[column_name].upper()
+            return self.BQ_TO_PG_TYPE_MAP.get(bq_type, default)
+
+        if is_json_column:
+            return 'JSONB'
+
+        return default
 
     @staticmethod
     def _quote_sql_literal(value: str) -> str:
@@ -1113,16 +1121,13 @@ class GCSToPostgresOperator(BaseOperator):
         try:
             columns_sql = []
             for col in df.columns:
-                if self.source_schema and col in self.source_schema:
-                    bq_type = self.source_schema[col].upper()
-                    pg_type = self.BQ_TO_PG_TYPE_MAP.get(bq_type, 'TEXT')
-                elif col == self.partition_column:
-                    pg_type = 'DATE'
-                else:
-                    pg_type = 'TEXT'
-
-                if df[col].apply(lambda x: isinstance(x, (dict, list))).any():
-                    pg_type = 'JSONB'
+                is_json_column = (
+                    df[col].apply(lambda x: isinstance(x, (dict, list))).any()
+                )
+                default_type = 'DATE' if col == self.partition_column else 'TEXT'
+                pg_type = self._resolve_postgres_column_type(
+                    col, default=default_type, is_json_column=is_json_column
+                )
 
                 columns_sql.append(f'"{col}" {pg_type}')
 
@@ -1177,10 +1182,12 @@ class GCSToPostgresOperator(BaseOperator):
         columns_sql = []
         for col in df.columns:
             col_ident = sql_mod.Identifier(col)
-            if col in json_columns:
-                columns_sql.append(sql_mod.SQL('{} JSONB').format(col_ident))
-            else:
-                columns_sql.append(sql_mod.SQL('{} TEXT').format(col_ident))
+            pg_type = self._resolve_postgres_column_type(
+                col, default='TEXT', is_json_column=col in json_columns
+            )
+            columns_sql.append(
+                sql_mod.SQL('{} {}').format(col_ident, sql_mod.SQL(pg_type))
+            )
 
         table_ident = (
             sql_mod.Identifier(schema, table_name)
