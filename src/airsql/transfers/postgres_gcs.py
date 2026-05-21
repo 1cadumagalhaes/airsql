@@ -41,7 +41,7 @@ POSTGRES_TO_BQ_TYPE_MAP = {
     'text': 'STRING',
     'varchar': 'STRING',
     'timestamp': 'TIMESTAMP',
-    'timestamptz': 'TIMETIME',
+    'timestamptz': 'TIMESTAMP',
     'time': 'TIME',
     'timetz': 'TIME',
     'uuid': 'STRING',

@@ -27,13 +27,19 @@ class TestFormatNumber:
 
 class TestBuildSchemaFromColumnTypes:
     def test_basic_types(self):
-        column_types = {'id': 'int4', 'name': 'text', 'created_at': 'timestamp'}
+        column_types = {
+            'id': 'int4',
+            'name': 'text',
+            'created_at': 'timestamp',
+            'updated_at': 'timestamptz',
+        }
         json_columns = set()
         result = _build_schema_from_column_types(column_types, json_columns)
-        assert len(result) == 3
+        assert len(result) == 4
         assert {'name': 'id', 'type': 'INTEGER', 'mode': 'NULLABLE'} in result
         assert {'name': 'name', 'type': 'STRING', 'mode': 'NULLABLE'} in result
         assert {'name': 'created_at', 'type': 'TIMESTAMP', 'mode': 'NULLABLE'} in result
+        assert {'name': 'updated_at', 'type': 'TIMESTAMP', 'mode': 'NULLABLE'} in result
 
     def test_json_columns(self):
         column_types = {'id': 'int4', 'metadata': 'json', 'config': 'jsonb'}
@@ -129,6 +135,7 @@ class TestPostgresToBqTypeMap:
         assert POSTGRES_TO_BQ_TYPE_MAP['int8'] == 'INTEGER'
         assert POSTGRES_TO_BQ_TYPE_MAP['float8'] == 'FLOAT'
         assert POSTGRES_TO_BQ_TYPE_MAP['text'] == 'STRING'
+        assert POSTGRES_TO_BQ_TYPE_MAP['timestamptz'] == 'TIMESTAMP'
         assert POSTGRES_TO_BQ_TYPE_MAP['json'] == 'JSON'
         assert POSTGRES_TO_BQ_TYPE_MAP['jsonb'] == 'JSON'
         assert POSTGRES_TO_BQ_TYPE_MAP['uuid'] == 'STRING'
