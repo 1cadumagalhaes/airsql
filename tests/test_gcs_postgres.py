@@ -462,6 +462,24 @@ class TestCoerceColumnTypes:
         assert result['enabled'].tolist()[1] is False
 
 
+class TestDataFrameToTuples:
+    def test_preserves_nullable_integer_values(self):
+        df = pd.DataFrame({
+            'impressions_count': [10, None, 30],
+            'metadata': [{'source': 'bq'}, None, ['tag']],
+        }).convert_dtypes(dtype_backend='pyarrow')
+        df['impressions_count'] = df['impressions_count'].astype('Int64')
+
+        result = GCSToPostgresOperator._dataframe_to_tuples(df)
+
+        assert result == [
+            (10, '{"source": "bq"}'),
+            (None, None),
+            (30, '["tag"]'),
+        ]
+        assert isinstance(result[0][0], int)
+
+
 class TestPartitionParameters:
     def test_partition_column_defaults_to_none(self):
         op = GCSToPostgresOperator(

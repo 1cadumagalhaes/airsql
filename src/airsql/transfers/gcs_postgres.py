@@ -138,23 +138,24 @@ class GCSToPostgresOperator(BaseOperator):
         import numpy as np  # noqa: PLC0415
         import pandas as pd  # noqa: PLC0415
 
-        if hasattr(df, '__arrow_c_stream__'):
-            # PyArrow-backed DataFrames: convert to object dtype while preserving None
-            df_clean = df.astype(object).where(pd.notna(df), None)
-        else:
-            df_clean = df.convert_dtypes().replace({pd.NA: None, np.nan: None})
-
         def convert_value(val):
             if val is None:
                 return None
-            if pd.isna(val):
-                return None
             if isinstance(val, (dict, list)):
                 return json.dumps(val)
+            if pd.isna(val):
+                return None
+            if isinstance(val, np.integer):
+                return int(val)
+            if isinstance(val, np.floating):
+                return float(val)
+            if isinstance(val, np.bool_):
+                return bool(val)
             return val
 
         return [
-            tuple(convert_value(v) for v in row) for row in df_clean.values.tolist()
+            tuple(convert_value(v) for v in row)
+            for row in df.itertuples(index=False, name=None)
         ]
 
     @staticmethod
