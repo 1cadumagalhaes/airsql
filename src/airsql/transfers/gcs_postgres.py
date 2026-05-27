@@ -556,7 +556,6 @@ class GCSToPostgresOperator(BaseOperator):
         conn = pg_hook.get_conn()
         cursor = conn.cursor()
         sql_mod = _get_sql_module(conn)
-        is_psycopg2 = _is_psycopg2_connection(conn)
 
         try:
             table_identifier = (
@@ -573,31 +572,16 @@ class GCSToPostgresOperator(BaseOperator):
 
             insert_cols_ident = [sql_mod.Identifier(col) for col in df_filtered.columns]
 
-            data_tuples = self._dataframe_to_tuples(df_filtered)
-
-            if not is_psycopg2:
-                copy_sql = sql_mod.SQL('COPY {table} ({columns}) FROM STDIN').format(
-                    table=table_identifier,
-                    columns=sql_mod.SQL(', ').join(insert_cols_ident),
-                )
-                with cursor.copy(copy_sql.as_string(cursor)) as copy:
-                    for row in data_tuples:
-                        copy.write_row(row)
-            else:
-                from psycopg2.extras import execute_values  # noqa: PLC0415
-
-                insert_sql_psycopg2 = sql_mod.SQL(
-                    'INSERT INTO {table} ({columns}) VALUES %s'
-                ).format(
-                    table=table_identifier,
-                    columns=sql_mod.SQL(', ').join(insert_cols_ident),
-                )
-                execute_values(
-                    cursor,
-                    insert_sql_psycopg2.as_string(cursor),
-                    data_tuples,
-                    page_size=1000,
-                )
+            self._insert_dataframe_rows(
+                cursor,
+                conn,
+                sql_mod,
+                schema,
+                table_name_simple,
+                df_filtered,
+                insert_cols_ident,
+                table_identifier,
+            )
 
             conn.commit()
             self.log.info('Truncate and insert to Postgres complete.')
@@ -609,6 +593,53 @@ class GCSToPostgresOperator(BaseOperator):
         finally:
             cursor.close()
             conn.close()
+
+    def _insert_dataframe_rows(
+        self,
+        cursor,
+        conn,
+        sql_mod,
+        schema,
+        table_name_simple,
+        df_filtered,
+        insert_cols_ident=None,
+        table_identifier=None,
+    ):
+        is_psycopg2 = _is_psycopg2_connection(conn)
+        insert_cols_ident = insert_cols_ident or [
+            sql_mod.Identifier(col) for col in df_filtered.columns
+        ]
+        table_identifier = table_identifier or (
+            sql_mod.Identifier(schema, table_name_simple)
+            if schema
+            else sql_mod.Identifier(table_name_simple)
+        )
+
+        data_tuples = self._dataframe_to_tuples(df_filtered)
+
+        if not is_psycopg2:
+            copy_sql = sql_mod.SQL('COPY {table} ({columns}) FROM STDIN').format(
+                table=table_identifier,
+                columns=sql_mod.SQL(', ').join(insert_cols_ident),
+            )
+            with cursor.copy(copy_sql.as_string(cursor)) as copy:
+                for row in data_tuples:
+                    copy.write_row(row)
+        else:
+            from psycopg2.extras import execute_values  # noqa: PLC0415
+
+            insert_sql_psycopg2 = sql_mod.SQL(
+                'INSERT INTO {table} ({columns}) VALUES %s'
+            ).format(
+                table=table_identifier,
+                columns=sql_mod.SQL(', ').join(insert_cols_ident),
+            )
+            execute_values(
+                cursor,
+                insert_sql_psycopg2.as_string(cursor),
+                data_tuples,
+                page_size=1000,
+            )
 
     def _upsert_data(self, pg_hook, schema, table_name_simple, df_filtered):
         """Perform upsert operation using ON CONFLICT."""
@@ -945,6 +976,7 @@ class GCSToPostgresOperator(BaseOperator):
 
             conn = pg_hook.get_conn()
             cursor = conn.cursor()
+            sql_mod = _get_sql_module(conn)
 
             try:
                 cursor.execute(f'DROP TABLE IF EXISTS {temp_table_name}')
@@ -956,23 +988,15 @@ class GCSToPostgresOperator(BaseOperator):
                 )
                 conn.commit()
 
-                cursor.close()
-                conn.close()
-
-                engine = pg_hook.get_sqlalchemy_engine()
                 df_to_insert = self._convert_json_columns_to_strings(df_partition)
-                df_to_insert.to_sql(
-                    name=temp_table_name,
-                    con=engine,
-                    schema=None,
-                    if_exists='append',
-                    index=False,
-                    method='multi',
-                    chunksize=1000,
+                self._insert_dataframe_rows(
+                    cursor,
+                    conn,
+                    sql_mod,
+                    None,
+                    temp_table_name,
+                    df_to_insert,
                 )
-
-                conn = pg_hook.get_conn()
-                cursor = conn.cursor()
 
                 cursor.execute(
                     """
