@@ -52,7 +52,7 @@ POSTGRES_TO_BQ_TYPE_MAP = {
 
 
 def _build_schema_from_column_types(
-    column_types: Dict[str, str], json_columns: set
+    column_types: Dict[str, str], json_columns: set, schema_overrides: Optional[Dict[str, str]] = None
 ) -> List[Dict]:
     """Build BigQuery schema from PostgreSQL column types.
 
@@ -70,7 +70,22 @@ def _build_schema_from_column_types(
         else:
             bq_type = POSTGRES_TO_BQ_TYPE_MAP.get(col_type, 'STRING')
             schema.append({'name': col_name, 'type': bq_type, 'mode': 'NULLABLE'})
-    return schema
+    return _apply_schema_overrides(schema, schema_overrides)
+
+
+def _apply_schema_overrides(
+    schema: List[Dict], schema_overrides: Optional[Dict[str, str]] = None
+) -> List[Dict]:
+    if not schema_overrides:
+        return schema
+
+    overrides = {name: field_type.upper() for name, field_type in schema_overrides.items()}
+    return [
+        {**field, 'type': overrides[field['name']]}
+        if field['name'] in overrides
+        else field
+        for field in schema
+    ]
 
 
 def _pa_table_to_bq_schema(
@@ -80,6 +95,7 @@ def _pa_table_to_bq_schema(
     threshold: float = 0.9,
     postgres_type_map: Optional[Dict[str, Dict]] = None,
     json_mode: bool = False,
+    schema_overrides: Optional[Dict[str, str]] = None,
 ) -> List[Dict]:
     """Convert a pandas (pyarrow-backed) DataFrame or pyarrow.Table to BigQuery schema.
 
@@ -224,7 +240,7 @@ def _pa_table_to_bq_schema(
         return 'STRING'
 
     schema = [_field_to_bq(f) for f in table.schema]
-    return schema
+    return _apply_schema_overrides(schema, schema_overrides)
 
 
 class PostgresToGCSOperator(BaseOperator):
@@ -246,6 +262,7 @@ class PostgresToGCSOperator(BaseOperator):
         export_format: The format to export the data to. Supported formats
             are 'csv', 'parquet', and 'jsonl'. Defaults to 'csv'.
         schema_filename: If set, a GCS file with the schema will be uploaded.
+        schema_overrides: BigQuery type overrides by top-level field name.
         pandas_chunksize: The number of rows to include in each chunk
             processed by pandas.
         use_copy: If True, use PostgreSQL COPY command for streaming.
@@ -288,6 +305,7 @@ class PostgresToGCSOperator(BaseOperator):
         gcp_conn_id: str = 'google_cloud_default',
         export_format: str = PostgresExportFormat.CSV,
         schema_filename: Optional[str] = None,
+        schema_overrides: Optional[Dict[str, str]] = None,
         pandas_chunksize: Optional[int] = None,
         use_copy: bool = False,
         use_temp_file: bool = False,
@@ -323,6 +341,7 @@ class PostgresToGCSOperator(BaseOperator):
         self.gcp_conn_id = gcp_conn_id
         self.export_format = export_format.lower()
         self.schema_filename = schema_filename
+        self.schema_overrides = schema_overrides or {}
         self.pandas_chunksize = pandas_chunksize
         self.use_copy = use_copy
         self.use_temp_file = use_temp_file
@@ -765,7 +784,7 @@ class PostgresToGCSOperator(BaseOperator):
             # Generate schema file for downstream operators
             if self.schema_filename or export_format == 'parquet':
                 schema_data = _build_schema_from_column_types(
-                    column_types, json_columns
+                    column_types, json_columns, self.schema_overrides
                 )
                 if self.schema_filename:
                     schema_filename = self.schema_filename
@@ -1100,6 +1119,7 @@ class PostgresToGCSOperator(BaseOperator):
                     detect_json=False,
                     postgres_type_map=postgres_type_map,
                     json_mode=(export_format == 'jsonl'),
+                    schema_overrides=self.schema_overrides,
                 )
                 gcs_hook.upload(
                     bucket_name=self.bucket,

@@ -54,6 +54,20 @@ class TestBuildSchemaFromColumnTypes:
         result = _build_schema_from_column_types(column_types, json_columns)
         assert {'name': 'custom_col', 'type': 'STRING', 'mode': 'NULLABLE'} in result
 
+    def test_schema_overrides_replace_inferred_type(self):
+        column_types = {'chat_slow_mode_wait_time': 'text'}
+        json_columns = set()
+        result = _build_schema_from_column_types(
+            column_types,
+            json_columns,
+            {'chat_slow_mode_wait_time': 'INTEGER'},
+        )
+        assert {
+            'name': 'chat_slow_mode_wait_time',
+            'type': 'INTEGER',
+            'mode': 'NULLABLE',
+        } in result
+
 
 class TestPaTableToBqSchema:
     def test_simple_types(self):
@@ -126,6 +140,15 @@ class TestPaTableToBqSchema:
         )
         schema_dict = {f['name']: f for f in schema}
         assert schema_dict['items']['type'] == 'JSON'
+
+    def test_schema_overrides_replace_dataframe_inferred_type(self):
+        df = pd.DataFrame({'chat_slow_mode_wait_time': ['10']})
+        schema = _pa_table_to_bq_schema(
+            df,
+            schema_overrides={'chat_slow_mode_wait_time': 'INTEGER'},
+        )
+        schema_dict = {f['name']: f for f in schema}
+        assert schema_dict['chat_slow_mode_wait_time']['type'] == 'INTEGER'
 
 
 class TestPostgresToBqTypeMap:

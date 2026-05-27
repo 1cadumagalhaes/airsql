@@ -37,6 +37,32 @@ class TestPostgresToBigQueryPaths:
 
         assert 'write_disposition' in op.template_fields
 
+    def test_schema_overrides_are_passed_to_extract_operator(self):
+        op = PostgresToBigQueryOperator(
+            task_id='test',
+            postgres_conn_id='pg',
+            sql='SELECT * FROM t',
+            gcs_bucket='bucket',
+            destination_project_dataset_table='project.dataset.table',
+            schema_overrides={'chat_slow_mode_wait_time': 'INTEGER'},
+            emit_asset=False,
+            check_source_exists=False,
+            dry_run=True,
+        )
+
+        mock_pg_to_gcs = MagicMock()
+        mock_pg_to_gcs.execute.return_value = 'gs://bucket/temp/data.csv'
+
+        with patch(
+            'airsql.transfers.postgres_gcs.PostgresToGCSOperator',
+            return_value=mock_pg_to_gcs,
+        ) as mock_operator:
+            op.execute({})
+
+        assert mock_operator.call_args.kwargs['schema_overrides'] == {
+            'chat_slow_mode_wait_time': 'INTEGER'
+        }
+
 
 class TestPostgresToBigQueryCleanup:
     def test_cleanup_temp_files_deletes_data_and_schema_paths(self):

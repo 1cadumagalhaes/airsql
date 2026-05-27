@@ -43,6 +43,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         gcs_temp_path: GCS path for temp files. Auto-generated if not provided.
         export_format: Export format: 'csv' or 'jsonl'. Defaults to 'csv'.
         schema_filename: GCS path for BigQuery schema JSON file. Optional.
+        schema_overrides: BigQuery type overrides by top-level field name.
         pandas_chunksize: Rows per chunk for large exports. Defaults to 100000.
         use_copy: If True, use PostgreSQL COPY for streaming. Defaults to False.
         use_temp_file: If True, use temporary file instead of streaming.
@@ -84,6 +85,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         gcs_temp_path: Optional[str] = None,
         export_format: str = PostgresExportFormat.CSV,
         schema_filename: Optional[str] = None,
+        schema_overrides: Optional[dict[str, str]] = None,
         pandas_chunksize: int = 100000,
         use_copy: bool = False,
         use_temp_file: bool = False,
@@ -139,6 +141,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.gcs_bucket = gcs_bucket
         self.export_format = export_format.lower()
         self.schema_filename = schema_filename
+        self.schema_overrides = schema_overrides or {}
         self.pandas_chunksize = pandas_chunksize
         self.use_copy = use_copy
         self.use_temp_file = use_temp_file
@@ -272,6 +275,7 @@ class PostgresToBigQueryOperator(BaseOperator):
             gcp_conn_id=self.gcp_conn_id,
             export_format=actual_export_format,
             schema_filename=actual_schema_filename,
+            schema_overrides=self.schema_overrides,
             pandas_chunksize=self.pandas_chunksize,
             use_copy=self.use_copy,
             use_temp_file=self.use_temp_file,
