@@ -137,8 +137,11 @@ class GCSToPostgresOperator(BaseOperator):
         """
         import numpy as np  # noqa: PLC0415
         import pandas as pd  # noqa: PLC0415
+        import pyarrow as pa  # noqa: PLC0415
 
         def convert_value(val):
+            if isinstance(val, pa.Scalar):
+                return convert_value(val.as_py())
             if val is None:
                 return None
             if isinstance(val, (dict, list)):
@@ -523,20 +526,29 @@ class GCSToPostgresOperator(BaseOperator):
                     pg_hook, schema, table_name_simple, df_filtered
                 )
             elif not self.conflict_columns:
-                engine = pg_hook.get_sqlalchemy_engine()
                 self.log.info(
                     f'Appending DataFrame to Postgres table {table_name_full}'
                 )
                 df_to_insert = self._convert_json_columns_to_strings(df_filtered)
-                df_to_insert.to_sql(
-                    name=table_name_simple,
-                    con=engine,
-                    schema=schema,
-                    if_exists='append',
-                    index=False,
-                    method='multi',
-                    chunksize=1000,
-                )
+                conn = pg_hook.get_conn()
+                cursor = conn.cursor()
+                sql_mod = _get_sql_module(conn)
+                try:
+                    self._insert_dataframe_rows(
+                        cursor,
+                        conn,
+                        sql_mod,
+                        schema,
+                        table_name_simple,
+                        df_to_insert,
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    cursor.close()
+                    conn.close()
                 self.log.info('Append to Postgres complete.')
             else:
                 self._upsert_data(pg_hook, schema, table_name_simple, df_filtered)
@@ -687,8 +699,20 @@ class GCSToPostgresOperator(BaseOperator):
                     )
                     for col in update_set_cols
                 ]
-                update_sql_part = sql_mod.SQL('UPDATE SET {}').format(
-                    sql_mod.SQL(', ').join(set_statements)
+                target_distinct_cols = [
+                    sql_mod.SQL('target.{col}').format(col=sql_mod.Identifier(col))
+                    for col in update_set_cols
+                ]
+                excluded_distinct_cols = [
+                    sql_mod.SQL('EXCLUDED.{col}').format(col=sql_mod.Identifier(col))
+                    for col in update_set_cols
+                ]
+                update_sql_part = sql_mod.SQL(
+                    'UPDATE SET {sets} WHERE ({target_cols}) IS DISTINCT FROM ({excluded_cols})'
+                ).format(
+                    sets=sql_mod.SQL(', ').join(set_statements),
+                    target_cols=sql_mod.SQL(', ').join(target_distinct_cols),
+                    excluded_cols=sql_mod.SQL(', ').join(excluded_distinct_cols),
                 )
 
             data_tuples = self._dataframe_to_tuples(df_filtered)
@@ -705,9 +729,18 @@ class GCSToPostgresOperator(BaseOperator):
                     set_clauses = [
                         f'"{col}" = EXCLUDED."{col}"' for col in update_set_cols
                     ]
-                    update_clause = f'UPDATE SET {", ".join(set_clauses)}'
+                    target_cols = ', '.join([
+                        f'target."{col}"' for col in update_set_cols
+                    ])
+                    excluded_cols = ', '.join([
+                        f'EXCLUDED."{col}"' for col in update_set_cols
+                    ])
+                    update_clause = (
+                        f'UPDATE SET {", ".join(set_clauses)} '
+                        f'WHERE ({target_cols}) IS DISTINCT FROM ({excluded_cols})'
+                    )
 
-                final_sql = f'INSERT INTO {schema}.{table_name_simple} ({col_names}) VALUES ({placeholders}) ON CONFLICT ({conflict_col_names}) DO {update_clause}'
+                final_sql = f'INSERT INTO {schema}.{table_name_simple} AS target ({col_names}) VALUES ({placeholders}) ON CONFLICT ({conflict_col_names}) DO {update_clause}'
 
                 for i in range(0, len(data_tuples), 1000):
                     batch = data_tuples[i : i + 1000]
@@ -716,7 +749,7 @@ class GCSToPostgresOperator(BaseOperator):
                 from psycopg2.extras import execute_values  # noqa: PLC0415
 
                 insert_sql_psycopg2 = sql_mod.SQL(
-                    'INSERT INTO {table} ({columns}) VALUES %s'
+                    'INSERT INTO {table} AS target ({columns}) VALUES %s'
                 ).format(
                     table=table_identifier,
                     columns=sql_mod.SQL(', ').join(insert_cols_ident),

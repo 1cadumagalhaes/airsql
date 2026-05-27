@@ -7,6 +7,29 @@ from airsql.hooks import DEFAULT_BIGQUERY_LOCATION, SQLHookManager
 from airsql.table import Table
 
 
+class TestDataFrameToTuples:
+    def test_converts_pyarrow_scalars_to_python_values(self):
+        import pyarrow as pa
+
+        df = pd.DataFrame({
+            'count': pd.Series([pa.scalar(10, type=pa.int64()), None], dtype='object'),
+            'rate': pd.Series(
+                [pa.scalar(1.5, type=pa.float64()), None], dtype='object'
+            ),
+            'active': pd.Series(
+                [pa.scalar(True, type=pa.bool_()), None], dtype='object'
+            ),
+            'metadata': pd.Series([pa.scalar({'source': 'bq'}), None], dtype='object'),
+        })
+
+        result = SQLHookManager._dataframe_to_tuples(df)
+
+        assert result == [(10, 1.5, True, '{"source": "bq"}'), (None, None, None, None)]
+        assert isinstance(result[0][0], int)
+        assert isinstance(result[0][1], float)
+        assert isinstance(result[0][2], bool)
+
+
 class TestEnsureBigQueryDataset:
     def test_ensure_bigquery_dataset_calls_create_dataset(self):
         mock_hook = MagicMock()

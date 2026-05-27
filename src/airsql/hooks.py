@@ -41,6 +41,35 @@ class SQLHookManager:
     """Manages database hooks and operations across different database types."""
 
     @staticmethod
+    def _dataframe_to_tuples(df: pd.DataFrame) -> list[tuple]:
+        import json  # noqa: PLC0415
+
+        import numpy as np  # noqa: PLC0415
+        import pyarrow as pa  # noqa: PLC0415
+
+        def convert_value(val):
+            if isinstance(val, pa.Scalar):
+                return convert_value(val.as_py())
+            if val is None:
+                return None
+            if isinstance(val, (dict, list)):
+                return json.dumps(val)
+            if pd.isna(val):
+                return None
+            if isinstance(val, np.integer):
+                return int(val)
+            if isinstance(val, np.floating):
+                return float(val)
+            if isinstance(val, np.bool_):
+                return bool(val)
+            return val
+
+        return [
+            tuple(convert_value(v) for v in row)
+            for row in df.itertuples(index=False, name=None)
+        ]
+
+    @staticmethod
     def get_hook(conn_id: str) -> Any:
         """Get the appropriate Airflow provider hook for a connection id.
 
@@ -921,15 +950,12 @@ WHEN NOT MATCHED THEN
                     )
                 update_cols = update_columns
 
-            # Convert DataFrame to tuples, handling pandas NA values for psycopg3
-            import numpy as np  # noqa: PLC0415
-            import pandas as pd  # noqa: PLC0415
-
-            df_clean = df_filtered[common_columns].replace({pd.NA: None, np.nan: None})
-            data_tuples = [tuple(x) for x in df_clean.values.tolist()]
+            data_tuples = SQLHookManager._dataframe_to_tuples(
+                df_filtered[common_columns]
+            )
 
             insert_sql = psycopg_sql.SQL(
-                'INSERT INTO {table} ({columns}) VALUES ({placeholders})'
+                'INSERT INTO {table} AS target ({columns}) VALUES ({placeholders})'
             ).format(
                 table=table_identifier,
                 columns=psycopg_sql.SQL(', ').join([
@@ -957,8 +983,24 @@ WHEN NOT MATCHED THEN
                     ).format(col_to_update=psycopg_sql.Identifier(col))
                     for col in update_cols
                 ]
-                update_sql_part = psycopg_sql.SQL('UPDATE SET {}').format(
-                    psycopg_sql.SQL(', ').join(set_statements)
+                target_distinct_cols = [
+                    psycopg_sql.SQL('target.{col}').format(
+                        col=psycopg_sql.Identifier(col)
+                    )
+                    for col in update_cols
+                ]
+                excluded_distinct_cols = [
+                    psycopg_sql.SQL('EXCLUDED.{col}').format(
+                        col=psycopg_sql.Identifier(col)
+                    )
+                    for col in update_cols
+                ]
+                update_sql_part = psycopg_sql.SQL(
+                    'UPDATE SET {sets} WHERE ({target_cols}) IS DISTINCT FROM ({excluded_cols})'
+                ).format(
+                    sets=psycopg_sql.SQL(', ').join(set_statements),
+                    target_cols=psycopg_sql.SQL(', ').join(target_distinct_cols),
+                    excluded_cols=psycopg_sql.SQL(', ').join(excluded_distinct_cols),
                 )
 
             final_sql_query = psycopg_sql.SQL(' ').join([
