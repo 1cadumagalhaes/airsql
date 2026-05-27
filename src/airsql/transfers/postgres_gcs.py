@@ -52,7 +52,9 @@ POSTGRES_TO_BQ_TYPE_MAP = {
 
 
 def _build_schema_from_column_types(
-    column_types: Dict[str, str], json_columns: set, schema_overrides: Optional[Dict[str, str]] = None
+    column_types: Dict[str, str],
+    json_columns: set,
+    schema_overrides: Optional[Dict[str, str]] = None,
 ) -> List[Dict]:
     """Build BigQuery schema from PostgreSQL column types.
 
@@ -79,7 +81,9 @@ def _apply_schema_overrides(
     if not schema_overrides:
         return schema
 
-    overrides = {name: field_type.upper() for name, field_type in schema_overrides.items()}
+    overrides = {
+        name: field_type.upper() for name, field_type in schema_overrides.items()
+    }
     return [
         {**field, 'type': overrides[field['name']]}
         if field['name'] in overrides

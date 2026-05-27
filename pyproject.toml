@@ -98,11 +98,22 @@ ignore = [
     'C901',
     'PLR0911',
     'PLC0415',
-    'S608'
+    'S608',
+    'PLW0717'
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = [
+    "S101",
+    "PLR6301",
+    "S608",
+    "PLR2004",
+    "PLC0415",
+    "PLC2701",
+    "B903",
+    "F841"
+]
+"tests/**/*.py" = [
     "S101",
     "PLR6301",
     "S608",
