@@ -63,7 +63,7 @@ bq_table = Table(
 
 ## Next Steps
 
-- Learn about [query operations](guides/query/index.md)
-- Explore [sensor usage](guides/sensors/index.md)
-- Understand [data transfer options](guides/transfers/index.md)
+- Learn about [query operations](usage/query/index.md)
+- Explore [sensor usage](usage/sensors/index.md)
+- Understand [data transfer options](usage/transfers/index.md)
 - Check out [complete examples](examples/index.md)
