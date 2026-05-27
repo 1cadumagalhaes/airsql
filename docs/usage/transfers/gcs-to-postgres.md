@@ -75,6 +75,10 @@ import_task = GCSToPostgresOperator(
 
 ### With Upsert
 
+Upserts use `conflict_columns` to identify existing rows. AirSQL stages incoming
+rows in a temporary PostgreSQL table, then runs one set-based
+`INSERT ... SELECT ... ON CONFLICT` statement against the target table.
+
 ```python
 import_task = GCSToPostgresOperator(
     task_id='upsert_data',
@@ -85,6 +89,11 @@ import_task = GCSToPostgresOperator(
     conflict_columns=['id']
 )
 ```
+
+If the incoming file contains duplicate conflict keys, AirSQL keeps the last row
+before loading the staging table. This avoids PostgreSQL's
+`ON CONFLICT DO UPDATE command cannot affect row a second time` error while
+matching the previous practical last-write-wins behavior.
 
 ### Replace Table
 
@@ -186,7 +195,12 @@ import_task = GCSToPostgresOperator(
 3. Reads data into pandas DataFrame
 4. Coerces column types to match PostgreSQL schema
 5. Handles JSON columns automatically
-6. Inserts or upserts data into PostgreSQL
+6. Inserts, replaces, partition-exchanges, or upserts data into PostgreSQL
+
+AirSQL uses typed row insertion for PostgreSQL writes instead of relying on
+`pandas.to_sql` for the critical load paths. This preserves nullable integers,
+booleans, floats, and PyArrow-backed scalar values when loading Parquet or other
+typed files into PostgreSQL columns.
 
 ## Supported Formats
 
@@ -215,6 +229,34 @@ import_task = GCSToPostgresOperator(
 )
 ```
 
+Upsert mode is optimized for larger batches:
+
+1. Incoming rows are deduplicated by `conflict_columns`, keeping the last row.
+2. Rows are loaded into a temporary staging table using typed row insertion.
+3. AirSQL inserts from staging into the target table with `ON CONFLICT`.
+4. Existing rows are only updated when selected values are actually different.
+
+For unchanged rows, AirSQL adds an `IS DISTINCT FROM` guard to avoid unnecessary
+physical updates. This reduces WAL, dead tuples, index churn, and autovacuum work
+on large PostgreSQL tables.
+
+Generated SQL is equivalent to:
+
+```sql
+CREATE TEMP TABLE _upsert_target_xxx
+(LIKE target INCLUDING DEFAULTS)
+ON COMMIT DROP;
+
+INSERT INTO target AS target (id, name, updated_at)
+SELECT staging.id, staging.name, staging.updated_at
+FROM _upsert_target_xxx AS staging
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    updated_at = EXCLUDED.updated_at
+WHERE (target.name, target.updated_at)
+IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.updated_at);
+```
+
 ## Type Coercion
 
 Automatically coerces types between BigQuery and PostgreSQL:
@@ -227,3 +269,10 @@ Automatically coerces types between BigQuery and PostgreSQL:
 | STRING | text |
 | TIMESTAMP | timestamptz |
 | JSON | jsonb |
+
+### PyArrow and Nullable Types
+
+When loading Parquet or Arrow-backed data, pandas may expose values as nullable
+extension dtypes or PyArrow scalar objects. AirSQL converts these values to
+native Python scalars before writing to PostgreSQL, so `BIGINT`, `BOOLEAN`,
+`DOUBLE PRECISION`, and nullable columns receive typed values rather than text.

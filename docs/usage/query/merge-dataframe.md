@@ -177,12 +177,14 @@ def test_merge():
 
 ## How It Works
 
-1. The DataFrame is processed row by row
-2. For each row:
-   - Check if the `conflict_columns` match an existing row
-   - If match: UPDATE the specified `update_columns`
-   - If no match: INSERT the new row
-3. If `timestamp_column` is specified, it's populated with the current timestamp
+1. AirSQL prepares the DataFrame and applies automatic timestamp columns if requested.
+2. Rows are merged into the target with backend-specific upsert semantics.
+3. If `timestamp_column` is specified, it is populated with the current timestamp.
+
+For PostgreSQL targets, AirSQL converts pandas, NumPy, and PyArrow scalar values
+to native Python values before executing `INSERT ... ON CONFLICT`. Existing rows
+are only updated when selected values are different, using an `IS DISTINCT FROM`
+guard to avoid no-op physical updates.
 
 ### Generated SQL (PostgreSQL Example)
 
@@ -194,6 +196,8 @@ DO UPDATE SET
     name = EXCLUDED.name,
     email = EXCLUDED.email,
     last_login = EXCLUDED.last_login
+WHERE (users.name, users.email, users.last_login)
+IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.email, EXCLUDED.last_login)
 ```
 
 ## Update Columns Behavior

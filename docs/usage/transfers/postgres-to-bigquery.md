@@ -30,6 +30,7 @@ transfer = PostgresToBigQueryOperator(
 | `gcs_temp_path` | `str` | No | GCS path for temp files |
 | `export_format` | `str` | No | Format: csv, jsonl (default: csv) |
 | `schema_filename` | `str` | No | Path for BigQuery schema JSON |
+| `schema_overrides` | `dict[str, str]` | No | Override inferred BigQuery types by field name |
 | `pandas_chunksize` | `int` | No | Rows per chunk for large exports |
 | `use_copy` | `bool` | No | Use COPY for streaming (default: False) |
 | `write_disposition` | `str` | No | WRITE_TRUNCATE, WRITE_APPEND (default: WRITE_TRUNCATE) |
@@ -101,6 +102,10 @@ export = PostgresToBigQueryOperator(
 
 ### Large Dataset with Streaming
 
+Use `use_copy=True` to stream PostgreSQL extraction through `COPY` instead of
+materializing each chunk as a pandas DataFrame. This is the preferred path for
+large exports where extraction memory is the bottleneck.
+
 ```python
 export = PostgresToBigQueryOperator(
     task_id='large_export',
@@ -126,6 +131,37 @@ export = PostgresToBigQueryOperator(
     schema_filename='schemas/events.json'
 )
 ```
+
+### Schema Overrides
+
+Use `schema_overrides` when the PostgreSQL query exposes a field as one type but
+the destination BigQuery table expects another. This is common with expressions,
+JSON extraction, or casts that PostgreSQL reports as `text` while the destination
+field is numeric.
+
+```python
+export = PostgresToBigQueryOperator(
+    task_id='stream_snapshots_to_bq',
+    sql="""
+        SELECT
+            id,
+            NULLIF(metadata->>'chat_slow_mode_wait_time', '')::bigint
+                AS chat_slow_mode_wait_time,
+            captured_at
+        FROM public.stream_snapshots
+    """,
+    destination_project_dataset_table='my-project.retize_twitch.stream_snapshots',
+    postgres_conn_id='postgres_default',
+    gcs_bucket='export-bucket',
+    use_copy=True,
+    schema_overrides={
+        'chat_slow_mode_wait_time': 'INTEGER',
+    },
+)
+```
+
+Overrides are applied after schema inference and work with both COPY-based and
+pandas/pyarrow-based schema generation.
 
 ### Custom GCS Path
 
@@ -171,6 +207,10 @@ export = PostgresToBigQueryOperator(
 
 JSON columns are automatically detected and format is switched to JSONL.
 
+If you set `export_format='jsonl'`, prefer a matching `gcs_temp_path` suffix such
+as `data.jsonl`. BigQuery uses the configured source format for parsing, but a
+matching path makes staged files and generated schema files easier to inspect.
+
 ## Partitioning
 
 Partition large tables for better query performance:
@@ -201,4 +241,18 @@ export = PostgresToBigQueryOperator(
     gcs_bucket='export-bucket',
     pandas_chunksize=100000
 )
+```
+
+For the lowest extraction memory footprint, combine chunking with `use_copy=True`
+when the query is compatible with PostgreSQL `COPY TO STDOUT`.
+
+## Timestamp Types
+
+PostgreSQL `timestamp` and `timestamptz` columns map to BigQuery `TIMESTAMP`.
+When using `timestamptz`, PostgreSQL stores an instant in time; BigQuery
+`TIMESTAMP` also represents an absolute instant. If you need UTC wall-clock
+values from an expression, cast explicitly in SQL:
+
+```sql
+created_at AT TIME ZONE 'UTC' AS created_at
 ```

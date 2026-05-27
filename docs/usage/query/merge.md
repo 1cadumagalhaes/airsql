@@ -154,10 +154,13 @@ def merge_user_events(run_date):
 
 1. Executes the SQL query to get the source data
 2. Loads results into a pandas DataFrame
-3. For each row in the DataFrame:
-   - If `conflict_columns` match existing row: UPDATE specified columns
-   - If no match: INSERT new row
+3. Inserts rows with backend-specific upsert semantics
 4. Returns the table reference as a string
+
+For PostgreSQL targets, AirSQL uses `INSERT ... ON CONFLICT ... DO UPDATE` and
+converts pandas, NumPy, and PyArrow scalar values to native Python values before
+executing the merge. Existing rows are only updated when selected values are
+different, using an `IS DISTINCT FROM` guard to avoid no-op physical updates.
 
 ### PostgreSQL Example (Generated SQL)
 
@@ -169,7 +172,12 @@ DO UPDATE SET
     name = EXCLUDED.name,
     email = EXCLUDED.email,
     updated_at = EXCLUDED.updated_at
+WHERE (users.name, users.email, users.updated_at)
+IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.email, EXCLUDED.updated_at)
 ```
+
+This reduces WAL, dead tuples, and index churn for large merges where many rows
+already contain the same values.
 
 ## Use Cases
 
