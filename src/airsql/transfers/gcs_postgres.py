@@ -654,26 +654,42 @@ class GCSToPostgresOperator(BaseOperator):
             )
 
     def _upsert_data(self, pg_hook, schema, table_name_simple, df_filtered):
-        """Perform upsert operation using ON CONFLICT."""
+        """Perform upsert operation using a staging table and ON CONFLICT."""
         table_full_name = f'{schema}.{table_name_simple}'
         self.log.info(f'Upserting DataFrame into Postgres table {table_full_name}')
         conn = pg_hook.get_conn()
         cursor = conn.cursor()
         sql_mod = _get_sql_module(conn)
-        is_psycopg2 = _is_psycopg2_connection(conn)
         conflict_columns = self.conflict_columns or []
 
         try:
             if not conflict_columns:
                 raise ValueError('conflict_columns is required for upsert operations')
 
+            missing_conflict_columns = [
+                col for col in conflict_columns if col not in df_filtered.columns
+            ]
+            if missing_conflict_columns:
+                raise ValueError(
+                    f'Conflict columns not found in DataFrame: {missing_conflict_columns}'
+                )
+
+            df_to_upsert = df_filtered.drop_duplicates(
+                subset=conflict_columns,
+                keep='last',
+            )
+
             table_identifier = (
                 sql_mod.Identifier(schema, table_name_simple)
                 if schema
                 else sql_mod.Identifier(table_name_simple)
             )
+            temp_table_name = self._build_upsert_temp_table_name(table_name_simple)
+            temp_table_identifier = sql_mod.Identifier(temp_table_name)
 
-            insert_cols_ident = [sql_mod.Identifier(col) for col in df_filtered.columns]
+            insert_cols_ident = [
+                sql_mod.Identifier(col) for col in df_to_upsert.columns
+            ]
 
             conflict_cols_ident = [sql_mod.Identifier(col) for col in conflict_columns]
 
@@ -685,7 +701,7 @@ class GCSToPostgresOperator(BaseOperator):
             }
             update_set_cols = [
                 col
-                for col in df_filtered.columns
+                for col in df_to_upsert.columns
                 if col not in conflict_columns
                 and col.lower() not in audit_cols_to_exclude
             ]
@@ -715,61 +731,46 @@ class GCSToPostgresOperator(BaseOperator):
                     excluded_cols=sql_mod.SQL(', ').join(excluded_distinct_cols),
                 )
 
-            data_tuples = self._dataframe_to_tuples(df_filtered)
-
-            if not is_psycopg2:
-                col_names = ', '.join(df_filtered.columns)
-                placeholders = ', '.join(['%s'] * len(df_filtered.columns))
-
-                conflict_col_names = ', '.join(conflict_columns)
-
-                if not update_set_cols:
-                    update_clause = 'NOTHING'
-                else:
-                    set_clauses = [
-                        f'"{col}" = EXCLUDED."{col}"' for col in update_set_cols
-                    ]
-                    target_cols = ', '.join([
-                        f'target."{col}"' for col in update_set_cols
-                    ])
-                    excluded_cols = ', '.join([
-                        f'EXCLUDED."{col}"' for col in update_set_cols
-                    ])
-                    update_clause = (
-                        f'UPDATE SET {", ".join(set_clauses)} '
-                        f'WHERE ({target_cols}) IS DISTINCT FROM ({excluded_cols})'
-                    )
-
-                final_sql = f'INSERT INTO {schema}.{table_name_simple} AS target ({col_names}) VALUES ({placeholders}) ON CONFLICT ({conflict_col_names}) DO {update_clause}'
-
-                for i in range(0, len(data_tuples), 1000):
-                    batch = data_tuples[i : i + 1000]
-                    cursor.executemany(final_sql, batch)
-            else:
-                from psycopg2.extras import execute_values  # noqa: PLC0415
-
-                insert_sql_psycopg2 = sql_mod.SQL(
-                    'INSERT INTO {table} AS target ({columns}) VALUES %s'
+            cursor.execute(
+                sql_mod.SQL(
+                    'CREATE TEMP TABLE {temp_table} (LIKE {target_table} INCLUDING DEFAULTS) ON COMMIT DROP'
                 ).format(
-                    table=table_identifier,
-                    columns=sql_mod.SQL(', ').join(insert_cols_ident),
+                    temp_table=temp_table_identifier,
+                    target_table=table_identifier,
                 )
+            )
 
-                conflict_sql_part = sql_mod.SQL(
-                    'ON CONFLICT ({conflict_cols}) DO '
-                ).format(conflict_cols=sql_mod.SQL(', ').join(conflict_cols_ident))
+            self._insert_dataframe_rows(
+                cursor,
+                conn,
+                sql_mod,
+                None,
+                temp_table_name,
+                df_to_upsert,
+                insert_cols_ident,
+                temp_table_identifier,
+            )
 
-                final_sql_query_psycopg2 = sql_mod.SQL(' ').join([
-                    insert_sql_psycopg2,
-                    conflict_sql_part,
-                    update_sql_part,
-                ])
-                execute_values(
-                    cursor,
-                    final_sql_query_psycopg2.as_string(cursor),
-                    data_tuples,
-                    page_size=1000,
+            source_select_cols = [
+                sql_mod.SQL('{temp_table}.{col}').format(
+                    temp_table=temp_table_identifier,
+                    col=sql_mod.Identifier(col),
                 )
+                for col in df_to_upsert.columns
+            ]
+            insert_select_sql = sql_mod.SQL(
+                'INSERT INTO {target_table} AS target ({columns}) '
+                'SELECT {source_columns} FROM {temp_table} '
+                'ON CONFLICT ({conflict_cols}) DO {update_sql}'
+            ).format(
+                target_table=table_identifier,
+                columns=sql_mod.SQL(', ').join(insert_cols_ident),
+                source_columns=sql_mod.SQL(', ').join(source_select_cols),
+                temp_table=temp_table_identifier,
+                conflict_cols=sql_mod.SQL(', ').join(conflict_cols_ident),
+                update_sql=update_sql_part,
+            )
+            cursor.execute(insert_select_sql)
             conn.commit()
             self.log.info('Upsert to Postgres complete.')
         except Exception as e:
@@ -1085,6 +1086,16 @@ class GCSToPostgresOperator(BaseOperator):
                 conn.commit()
             cursor.close()
             conn.close()
+
+    @classmethod
+    def _build_upsert_temp_table_name(cls, table_name: str) -> str:
+        timestamp = str(time.time_ns())
+        hash_suffix = hashlib.sha1(timestamp.encode('utf-8')).hexdigest()[:12]  # noqa: S324
+        suffix = f'_{hash_suffix}'
+        max_base_length = (
+            cls.POSTGRES_IDENTIFIER_MAX_LENGTH - len('_upsert_') - len(suffix)
+        )
+        return f'_upsert_{table_name[:max_base_length]}{suffix}'
 
     @classmethod
     def _build_partition_temp_table_name(

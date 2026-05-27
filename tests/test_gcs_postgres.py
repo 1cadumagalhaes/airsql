@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from airsql.transfers.gcs_postgres import GCSToPostgresOperator
 
@@ -500,6 +501,112 @@ class TestDataFrameToTuples:
         assert isinstance(result[0][0], int)
         assert isinstance(result[0][1], float)
         assert isinstance(result[0][2], bool)
+
+
+class TestUpsertData:
+    def test_build_upsert_temp_table_name_stays_within_postgres_limit(self):
+        temp_table_name = GCSToPostgresOperator._build_upsert_temp_table_name(
+            'social_audience_demographics_v2_with_a_very_long_suffix'
+        )
+
+        assert len(temp_table_name) <= 63
+        assert temp_table_name.startswith('_upsert_social_audience_demographics_v2')
+
+    def test_upsert_loads_deduplicated_rows_into_staging_table(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test_table',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            conflict_columns=['id'],
+        )
+        df = pd.DataFrame({
+            'id': [1, 1, 2],
+            'name': ['old', 'new', 'other'],
+            'updated_at': pd.to_datetime([
+                '2025-01-01',
+                '2025-01-02',
+                '2025-01-03',
+            ]),
+        })
+
+        cursor = MagicMock()
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+        mock_hook = MagicMock()
+        mock_hook.get_conn.return_value = conn
+
+        with (
+            patch.object(
+                op,
+                '_build_upsert_temp_table_name',
+                return_value='_upsert_test_table_abc',
+            ),
+            patch.object(
+                op, '_insert_dataframe_rows', return_value=None
+            ) as mock_insert,
+        ):
+            op._upsert_data(mock_hook, 'public', 'test_table', df)
+
+        mock_insert.assert_called_once()
+        staged_df = mock_insert.call_args.args[5]
+        assert staged_df['id'].tolist() == [1, 2]
+        assert staged_df['name'].tolist() == ['new', 'other']
+        assert cursor.execute.call_count == 2
+        conn.commit.assert_called_once()
+
+    def test_upsert_uses_staging_table_merge_sql(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test_table',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            conflict_columns=['id'],
+        )
+        df = pd.DataFrame({'id': [1], 'name': ['new']})
+
+        cursor = MagicMock()
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+        mock_hook = MagicMock()
+        mock_hook.get_conn.return_value = conn
+
+        with (
+            patch.object(
+                op,
+                '_build_upsert_temp_table_name',
+                return_value='_upsert_test_table_abc',
+            ),
+            patch.object(op, '_insert_dataframe_rows', return_value=None),
+        ):
+            op._upsert_data(mock_hook, 'public', 'test_table', df)
+
+        execute_sql = [str(call.args[0]) for call in cursor.execute.call_args_list]
+        assert any('CREATE TEMP TABLE' in sql for sql in execute_sql)
+        assert any('SELECT' in sql and 'ON CONFLICT' in sql for sql in execute_sql)
+        assert all('VALUES %s' not in sql for sql in execute_sql)
+
+    def test_upsert_validates_conflict_columns_exist(self):
+        op = GCSToPostgresOperator(
+            task_id='test',
+            target_table_name='public.test_table',
+            bucket_name='bucket',
+            object_name='data.parquet',
+            postgres_conn_id='pg',
+            gcp_conn_id='gcp',
+            conflict_columns=['missing_id'],
+        )
+        mock_hook = MagicMock()
+        mock_hook.get_conn.return_value.cursor.return_value = MagicMock()
+
+        with pytest.raises(ValueError, match='Conflict columns not found'):
+            op._upsert_data(
+                mock_hook, 'public', 'test_table', pd.DataFrame({'id': [1]})
+            )
 
 
 class TestPartitionParameters:
