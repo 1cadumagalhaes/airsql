@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 BIGQUERY_TABLE_NAME_PARTS = 2
 DEFAULT_TIMESTAMP_COLUMNS = ['updated_at', 'atualizado_em']
 DEFAULT_BIGQUERY_LOCATION = 'us-central1'
+BIGQUERY_JOB_TIMEOUT_SECONDS = 600
 
 
 @lru_cache(maxsize=128)
@@ -529,7 +530,7 @@ class SQLHookManager:
         job = client.load_table_from_dataframe(
             df, destination_table_ref, job_config=job_config, location=location
         )
-        job.result()
+        job.result(timeout=BIGQUERY_JOB_TIMEOUT_SECONDS)
 
     @staticmethod
     def _write_to_postgres(df, table: Table, if_exists: str = 'append') -> None:
@@ -619,7 +620,7 @@ class SQLHookManager:
         job = client.load_table_from_dataframe(
             df, destination_table_ref, job_config=job_config, location=location
         )
-        job.result()
+        job.result(timeout=BIGQUERY_JOB_TIMEOUT_SECONDS)
 
     @staticmethod
     def _ensure_partitioned_postgres_table(
@@ -824,7 +825,7 @@ class SQLHookManager:
             job = client.load_table_from_dataframe(
                 df, temp_table_ref, job_config=job_config, location=location
             )
-            job.result()
+            job.result(timeout=BIGQUERY_JOB_TIMEOUT_SECONDS)
             temp_table_full = f'{project_id}.{dataset_id}.{temp_table_id}'
             all_columns = df.columns.tolist()
 
@@ -855,7 +856,7 @@ WHEN NOT MATCHED THEN
                 location=location,
             )
             query_job = client.query(merge_sql, job_config=job_config)
-            query_job.result()
+            query_job.result(timeout=BIGQUERY_JOB_TIMEOUT_SECONDS)
 
         finally:
             try:

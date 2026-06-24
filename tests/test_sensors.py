@@ -1,6 +1,9 @@
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+from airflow.exceptions import AirflowSkipException
+
 from airsql.sensors import BigQuerySqlSensor, PostgresSqlSensor
 
 
@@ -125,7 +128,8 @@ class TestBigQuerySqlSensor:
         context: dict[str, Any] = {}
         sensor.poke(context)
         assert sensor.poke_count == 1
-        sensor.poke(context)
+        with pytest.raises(AirflowSkipException):
+            sensor.poke(context)
         assert sensor.poke_count == 2
 
     def test_get_hook_returns_bigquery_hook(self) -> None:

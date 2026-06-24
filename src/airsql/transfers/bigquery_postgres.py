@@ -386,7 +386,7 @@ class BigQueryToPostgresOperator(BaseOperator):
 
                 client = bq_hook.get_client()
                 query_job = client.query(schema_query)
-                query_job.result()
+                query_job.result(timeout=600)
 
                 for field in query_job.schema:
                     if field.field_type.upper() in self.JSON_COLUMN_TYPES:
@@ -430,7 +430,7 @@ class BigQueryToPostgresOperator(BaseOperator):
 
                 client = bq_hook.get_client()
                 query_job = client.query(schema_query)
-                query_job.result()
+                query_job.result(timeout=600)
 
                 return {
                     field.name: field.field_type.upper() for field in query_job.schema

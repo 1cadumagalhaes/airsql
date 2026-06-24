@@ -2,6 +2,9 @@ from airflow.exceptions import AirflowSkipException
 from airflow.providers.common.sql.sensors.sql import SqlSensor
 
 
+BIGQUERY_SENSOR_TIMEOUT = 300
+
+
 class BigQuerySqlSensor(SqlSensor):
     """BigQuery SQL sensor with retry logic.
 
@@ -23,7 +26,7 @@ class BigQuerySqlSensor(SqlSensor):
         self.retries = retries
 
     def poke(self, context):
-        """Execute the sensor check.
+        """Execute the sensor check with a timeout on the BQ job.
 
         Args:
             context: Airflow task context.
@@ -35,7 +38,12 @@ class BigQuerySqlSensor(SqlSensor):
             AirflowSkipException: If poke returns False after retries are exhausted.
         """
         self.poke_count += 1
-        super_poke = super().poke(context)
+        hook = self._get_hook()
+        try:
+            records = hook.get_records(self.sql, timeout=BIGQUERY_SENSOR_TIMEOUT)
+        except Exception:
+            records = None
+        super_poke = bool(records)
         retries = self.retries if isinstance(self.retries, int) else 0
         if not super_poke and self.poke_count > retries:
             raise AirflowSkipException('Skipping task because poke returned False.')
