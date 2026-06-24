@@ -88,10 +88,13 @@ class _Placeholder:
     """Placeholder object that returns itself for any attribute access,
     allowing Jinja templates like {{ dag_run.run_id }} to render as
     empty string when Airflow context is unavailable (e.g. during DAG parsing)."""
+
     def __getattr__(self, _name):
         return ''
+
     def __str__(self):
         return ''
+
     def __repr__(self):
         return ''
 

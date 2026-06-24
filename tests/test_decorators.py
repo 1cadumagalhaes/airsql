@@ -773,7 +773,10 @@ class TestPlaceholderContext:
                 return "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
 
             op = my_query()
-            assert op.sql == "SELECT 'manual__2025-01-01' AS dag_run_id, 'my_dag' AS dag_id"
+            assert (
+                op.sql
+                == "SELECT 'manual__2025-01-01' AS dag_run_id, 'my_dag' AS dag_id"
+            )
 
 
 class TestSqlFileParameter:
