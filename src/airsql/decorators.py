@@ -84,8 +84,21 @@ def _sanitize_airflow_params(params: dict) -> dict:
     return sanitized
 
 
+class _Placeholder:
+    """Placeholder object that returns itself for any attribute access,
+    allowing Jinja templates like {{ dag_run.run_id }} to render as
+    empty string when Airflow context is unavailable (e.g. during DAG parsing)."""
+    def __getattr__(self, _name):
+        return ''
+    def __str__(self):
+        return ''
+    def __repr__(self):
+        return ''
+
+
 def _get_airflow_context() -> dict:
     """Get Airflow context for Jinja rendering, returns empty dict if not available."""
+    placeholder = _Placeholder()
     try:
         context = get_current_context()
         if context:
@@ -99,15 +112,20 @@ def _get_airflow_context() -> dict:
                 'logical_date': context.get('logical_date'),
                 'data_interval_start': context.get('data_interval_start'),
                 'data_interval_end': context.get('data_interval_end'),
-                'dag': context.get('dag'),
-                'dag_run': context.get('dag_run'),
-                'run_id': context.get('run_id'),
-                'task': context.get('task'),
-                'task_instance': context.get('task_instance'),
+                'dag': context.get('dag', placeholder),
+                'dag_run': context.get('dag_run', placeholder),
+                'run_id': context.get('run_id', ''),
+                'task': context.get('task', placeholder),
+                'task_instance': context.get('task_instance', placeholder),
             }
     except Exception as e:
         logger.debug('Could not get Airflow context: %s', e)
-    return {}
+    return {
+        'dag': placeholder,
+        'dag_run': placeholder,
+        'task': placeholder,
+        'task_instance': placeholder,
+    }
 
 
 class SQLDecorators:
