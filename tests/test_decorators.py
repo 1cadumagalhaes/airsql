@@ -733,6 +733,49 @@ class TestDdlDecorator:
         assert op.output_table is None
 
 
+class TestPlaceholderContext:
+    def test_dag_run_placeholder_when_context_unavailable(self) -> None:
+        from unittest.mock import patch
+
+        with patch('airsql.decorators.get_current_context', side_effect=Exception):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query() -> str:
+                return "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
+
+            op = my_query()
+            assert op.sql == "SELECT '' AS dag_run_id, '' AS dag_id"
+
+    def test_dag_run_placeholder_when_context_empty(self) -> None:
+        from unittest.mock import patch
+
+        with patch('airsql.decorators.get_current_context', return_value={}):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query() -> str:
+                return "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
+
+            op = my_query()
+            assert op.sql == "SELECT '' AS dag_run_id, '' AS dag_id"
+
+    def test_dag_run_renders_at_runtime(self) -> None:
+        from unittest.mock import patch
+
+        mock_context = {
+            'dag_run': type('FakeDagRun', (), {'run_id': 'manual__2025-01-01'})(),
+            'dag': type('FakeDag', (), {'dag_id': 'my_dag'})(),
+        }
+
+        with patch('airsql.decorators.get_current_context', return_value=mock_context):
+
+            @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
+            def my_query() -> str:
+                return "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
+
+            op = my_query()
+            assert op.sql == "SELECT 'manual__2025-01-01' AS dag_run_id, 'my_dag' AS dag_id"
+
+
 class TestSqlFileParameter:
     def test_missing_sql_file_raises(self) -> None:
         @sql.query(
