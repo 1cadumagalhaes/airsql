@@ -787,8 +787,8 @@ class TestWhereParameter:
 
         assert 'metadata' in result
         assert 'id' not in result
-        mock_cursor.execute.assert_called_once()
-        call_arg = mock_cursor.execute.call_args[0][0]
+        assert mock_cursor.execute.call_count == 2
+        call_arg = mock_cursor.execute.call_args_list[1][0][0]
         assert 'WHERE active = true' in call_arg
 
     def test_get_column_types_uses_final_query(self):
@@ -831,7 +831,7 @@ class TestWhereParameter:
         result = op._get_column_types(mock_hook)
 
         assert result == {'id': 'int4', 'name': 'text'}
-        call_arg = mock_cursor.execute.call_args[0][0]
+        call_arg = mock_cursor.execute.call_args_list[1][0][0]
         assert 'WHERE active = true' in call_arg
 
     def test_build_copy_query_uses_final_query_with_where(self):

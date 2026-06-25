@@ -387,6 +387,7 @@ class PostgresToGCSOperator(BaseOperator):
             type_query = f'SELECT * FROM ({query}) AS subquery LIMIT 0'  # noqa: S608
             conn = pg_hook.get_conn()
             cur = conn.cursor()
+            cur.execute('SET statement_timeout = 30000')
             cur.execute(type_query)
             desc = cur.description
             col_names = [d[0] for d in desc]
@@ -419,6 +420,7 @@ class PostgresToGCSOperator(BaseOperator):
             type_query = f'SELECT * FROM ({query}) AS subquery LIMIT 0'  # noqa: S608
             conn = pg_hook.get_conn()
             cur = conn.cursor()
+            cur.execute('SET statement_timeout = 30000')
             cur.execute(type_query)
             desc = cur.description
 
@@ -471,6 +473,7 @@ class PostgresToGCSOperator(BaseOperator):
 
             conn = pg_hook.get_conn()
             cur = conn.cursor()
+            cur.execute('SET statement_timeout = 30000')
             cur.execute(sample_query)
 
             for row in cur:
