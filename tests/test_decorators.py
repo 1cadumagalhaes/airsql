@@ -22,6 +22,11 @@ from tests.fixtures.data import (
 sql = SQLDecorators()
 
 
+def _render_op(op, context: dict | None = None):
+    op.render_template_fields(context or {'params': {}})
+    return op
+
+
 class TestQueryDecorator:  # noqa: PLR0904
     def test_is_callable(self) -> None:
         @sql.query(output_table=TABLE_SIMPLE, source_conn=CONN_ID)
@@ -70,7 +75,7 @@ class TestQueryDecorator:  # noqa: PLR0904
         def my_query() -> str:
             return 'SELECT * FROM {{ table_name }}'
 
-        op = my_query()
+        op = _render_op(my_query())
         assert op.sql == 'SELECT * FROM users'
 
     def test_jinja_template_from_func_args(self) -> None:
@@ -78,7 +83,7 @@ class TestQueryDecorator:  # noqa: PLR0904
         def my_query(table_name: str) -> str:
             return 'SELECT * FROM {{ table_name }}'
 
-        op = my_query(table_name='orders')
+        op = _render_op(my_query(table_name='orders'))
         assert op.sql == 'SELECT * FROM orders'
 
     def test_template_vars_passed_to_operator(self) -> None:
@@ -102,11 +107,11 @@ class TestQueryDecorator:  # noqa: PLR0904
                 ORDER BY id
             """
 
-        op_no_filter = my_query(dominio=None)
+        op_no_filter = _render_op(my_query(dominio=None))
         assert 'AND dominio' not in op_no_filter.sql
         assert 'WHERE active = true' in op_no_filter.sql
 
-        op_with_filter = my_query(dominio='instagram')
+        op_with_filter = _render_op(my_query(dominio='instagram'))
         assert "AND dominio = 'instagram'" in op_with_filter.sql
 
     def test_jinja_conditional_with_empty_string(self) -> None:
@@ -120,13 +125,13 @@ class TestQueryDecorator:  # noqa: PLR0904
                 {% endif %}
             """
 
-        op_no_filter = my_query(status=None)
+        op_no_filter = _render_op(my_query(status=None))
         assert 'AND status' not in op_no_filter.sql
 
-        op_empty = my_query(status='')
+        op_empty = _render_op(my_query(status=''))
         assert 'AND status' not in op_empty.sql
 
-        op_with_filter = my_query(status='pending')
+        op_with_filter = _render_op(my_query(status='pending'))
         assert "status = 'pending'" in op_with_filter.sql
 
     def test_airflow_params_template_rendering(self) -> None:
@@ -153,6 +158,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                 username='{{ params.username }}',
                 id_inventario='{{ params.id_inventario }}',
             )
+            op = _render_op(op, mock_context)
             assert "username = 'test_user'" in op.sql
             assert 'AND id = 123' in op.sql
 
@@ -180,6 +186,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                 username='{{ params.username }}',
                 id_inventario='{{ params.id_inventario }}',
             )
+            op = _render_op(op, mock_context)
             assert 'AND username' not in op.sql
             assert 'AND id' not in op.sql
 
@@ -207,6 +214,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                 username='{{ params.username }}',
                 id_inventario='{{ params.id_inventario }}',
             )
+            op = _render_op(op, mock_context)
             assert 'AND username' not in op.sql
             assert 'AND id' not in op.sql
 
@@ -234,6 +242,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                 username='{{ params.username }}',
                 id_inventario='{{ params.id_inventario }}',
             )
+            op = _render_op(op, mock_context)
             assert "username = 'instagram'" in op.sql
             assert 'AND id' not in op.sql
 
@@ -251,7 +260,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                     WHERE event_date = '{{ execution_date }}'
                 """
 
-            op = my_query(execution_date='{{ ds }}')
+            op = _render_op(my_query(execution_date='{{ ds }}'), mock_context)
             assert "event_date = '2025-01-15'" in op.sql
 
     def test_airflow_params_with_list_values(self) -> None:
@@ -268,7 +277,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                     WHERE canal IN ({{ canais }})
                 """
 
-            op = my_query(canais='{{ params.canais }}')
+            op = _render_op(my_query(canais='{{ params.canais }}'), mock_context)
             assert 'canal IN (instagram,facebook,twitter)' in op.sql
 
     def test_airflow_params_with_dict_values(self) -> None:
@@ -292,6 +301,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                 status='{{ params.filters.status }}',
                 region='{{ params.filters.region }}',
             )
+            op = _render_op(op, mock_context)
             assert "status = 'active'" in op.sql
             assert "region = 'us-east'" in op.sql
 
@@ -309,7 +319,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                     WHERE username = '{{ username }}'
                 """
 
-            op = my_query(username='static_value')
+            op = _render_op(my_query(username='static_value'), mock_context)
             assert "username = 'static_value'" in op.sql
 
     def test_airflow_params_missing_key_returns_empty_string(self) -> None:
@@ -329,7 +339,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                     {% endif %}
                 """
 
-            op = my_query(username='{{ params.username }}')
+            op = _render_op(my_query(username='{{ params.username }}'), mock_context)
             assert 'AND username' not in op.sql
 
     def test_airflow_params_direct_access_in_template(self) -> None:
@@ -352,7 +362,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                     {% endif %}
                 """
 
-            op = my_query()
+            op = _render_op(my_query(), mock_context)
             assert "username = 'instagram'" in op.sql
             assert 'AND id = 123' in op.sql
 
@@ -376,7 +386,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                     {% endif %}
                 """
 
-            op = my_query()
+            op = _render_op(my_query(), mock_context)
             assert 'AND username' not in op.sql
             assert 'AND id' not in op.sql
 
@@ -400,7 +410,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                     {% endif %}
                 """
 
-            op = my_query()
+            op = _render_op(my_query(), mock_context)
             assert 'AND username' not in op.sql
             assert 'AND id' not in op.sql
 
@@ -428,6 +438,7 @@ class TestQueryDecorator:  # noqa: PLR0904
                 username='{{ params.username }}',
                 id_inventario='{{ params.id_inventario }}',
             )
+            op = _render_op(op, mock_context)
             assert 'AND username' not in op.sql
             assert 'AND id' not in op.sql
 
@@ -463,7 +474,7 @@ class TestAppendDecorator:
         def my_append(status: str) -> str:
             return "SELECT * FROM orders WHERE status = '{{ status }}'"
 
-        op = my_append(status='completed')
+        op = _render_op(my_append(status='completed'))
         assert op.sql == "SELECT * FROM orders WHERE status = 'completed'"
 
 
@@ -702,7 +713,7 @@ class TestCheckDecorator:
         def my_check(table_name: str) -> str:
             return 'SELECT COUNT(*) FROM {{ table_name }} WHERE id IS NULL'
 
-        op = my_check(table_name='users')
+        op = _render_op(my_check(table_name='users'))
         assert op.sql == 'SELECT COUNT(*) FROM users WHERE id IS NULL'
 
 
@@ -734,7 +745,7 @@ class TestDdlDecorator:
 
 
 class TestPlaceholderContext:
-    def test_dag_run_placeholder_when_context_unavailable(self) -> None:
+    def test_dag_run_template_preserved_before_runtime_context(self) -> None:
         from unittest.mock import patch
 
         with patch('airsql.decorators.get_current_context', side_effect=Exception):
@@ -744,9 +755,14 @@ class TestPlaceholderContext:
                 return "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
 
             op = my_query()
-            assert op.sql == "SELECT '' AS dag_run_id, '' AS dag_id"
+            assert (
+                op.sql
+                == "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
+            )
 
-    def test_dag_run_placeholder_when_context_empty(self) -> None:
+    def test_dag_run_template_preserved_when_context_empty_at_construction(
+        self,
+    ) -> None:
         from unittest.mock import patch
 
         with patch('airsql.decorators.get_current_context', return_value={}):
@@ -756,7 +772,10 @@ class TestPlaceholderContext:
                 return "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
 
             op = my_query()
-            assert op.sql == "SELECT '' AS dag_run_id, '' AS dag_id"
+            assert (
+                op.sql
+                == "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
+            )
 
     def test_dag_run_renders_at_runtime(self) -> None:
         from unittest.mock import patch
@@ -772,7 +791,7 @@ class TestPlaceholderContext:
             def my_query() -> str:
                 return "SELECT '{{ dag_run.run_id }}' AS dag_run_id, '{{ dag.dag_id }}' AS dag_id"
 
-            op = my_query()
+            op = _render_op(my_query(), mock_context)
             assert (
                 op.sql
                 == "SELECT 'manual__2025-01-01' AS dag_run_id, 'my_dag' AS dag_id"

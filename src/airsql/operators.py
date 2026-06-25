@@ -12,10 +12,62 @@ from airflow.providers.common.sql.operators.sql import (
     SQLCheckOperator as BaseSQLCheckOperator,
 )
 from airflow.sdk import Context
+from jinja2 import Environment
 
 from airsql.hooks import SQLHookManager
 from airsql.table import Table
 from airsql.utils import OperationSummary
+
+
+def _sanitize_template_values(value: Any) -> Any:
+    """Normalize UI-provided null-like strings before SQL conditional rendering."""
+    if isinstance(value, dict):
+        return {key: _sanitize_template_values(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_template_values(item) for item in value]
+    if value in {'None', 'null', ''}:
+        return None
+    return value
+
+
+def _render_template_value(value: Any, context: Any, jinja_env: Any) -> Any:
+    if isinstance(value, str):
+        template = jinja_env.from_string(value)
+        return template.render(context)
+    if isinstance(value, dict):
+        return {
+            key: _render_template_value(item, context, jinja_env)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_render_template_value(item, context, jinja_env) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_render_template_value(item, context, jinja_env) for item in value)
+    return value
+
+
+def _render_airsql_sql_template(
+    operator: Any,
+    context: Any,
+    jinja_env: Any | None = None,
+) -> None:
+    """Render airsql template vars before rendering the SQL field itself."""
+    if not jinja_env:
+        get_template_env = getattr(operator, 'get_template_env', None)
+        jinja_env = (
+            get_template_env() if get_template_env else Environment(autoescape=False)  # noqa: S701 SQL templates are not HTML.
+        )
+
+    template_vars = getattr(operator, 'template_vars', {}) or {}
+    rendered_template_vars = _render_template_value(template_vars, context, jinja_env)
+    rendered_template_vars = _sanitize_template_values(rendered_template_vars)
+    operator.template_vars = rendered_template_vars
+
+    render_context = dict(context)
+    if 'params' in render_context:
+        render_context['params'] = _sanitize_template_values(render_context['params'])
+    render_context.update(rendered_template_vars)
+    operator.sql = _render_template_value(operator.sql, render_context, jinja_env)
 
 
 def _is_bigquery_hook(hook: Any) -> bool:
@@ -75,10 +127,15 @@ class BaseSQLOperator(BaseOperator):
     Parameters in dynamic_params are stored as instance attributes for use in map_index_template.
     """
 
+    template_fields = ('sql', 'template_vars')
+    template_ext = ('.sql',)
+    template_fields_renderers = {'sql': 'sql'}
+
     def __init__(
         self,
         sql: str,
         source_conn: Optional[str] = None,
+        template_vars: Optional[dict[str, Any]] = None,
         dynamic_params: Optional[dict] = None,
         **kwargs,
     ):
@@ -108,6 +165,7 @@ class BaseSQLOperator(BaseOperator):
 
         super().__init__(**kwargs)
         self.sql = sql
+        self.template_vars = template_vars or {}
         self.source_conn = source_conn
         self.hook_manager = SQLHookManager()
 
@@ -119,6 +177,13 @@ class BaseSQLOperator(BaseOperator):
 
     def __getattr__(self, name: str) -> Any:
         raise AttributeError(name)
+
+    def render_template_fields(
+        self,
+        context: Any,
+        jinja_env: Any | None = None,
+    ) -> None:
+        _render_airsql_sql_template(self, context, jinja_env)
 
 
 class SQLQueryOperator(BaseSQLOperator):
@@ -751,10 +816,13 @@ class SQLCheckOperator(BaseSQLCheckOperator):
     - Any other value = test fails
     """
 
+    template_fields = ('sql', 'conn_id', 'database', 'hook_params', 'template_vars')
+
     def __init__(
         self,
         sql: str,
         source_conn: Optional[str] = None,
+        template_vars: Optional[dict[str, Any]] = None,
         retries: int = 1,
         **kwargs,
     ):
@@ -765,6 +833,14 @@ class SQLCheckOperator(BaseSQLCheckOperator):
             kwargs['retries'] = retries
 
         super().__init__(sql=sql, **kwargs)
+        self.template_vars = template_vars or {}
+
+    def render_template_fields(
+        self,
+        context: Any,
+        jinja_env: Any | None = None,
+    ) -> None:
+        _render_airsql_sql_template(self, context, jinja_env)
 
     def execute(self, context: Context) -> None:
         """Execute the SQL check with debug logging."""

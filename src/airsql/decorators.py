@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from airflow.sdk import get_current_context, task
-from jinja2 import Environment, Undefined, select_autoescape
+from jinja2 import Environment, select_autoescape
 
 from airsql.file import File
 from airsql.table import Table
@@ -143,9 +143,9 @@ class SQLDecorators:
             loader=None, autoescape=select_autoescape(['sql'])
         )
 
-    def _load_sql_from_file(self, sql_file: str, **template_vars) -> str:
+    def _load_sql_from_file(self, sql_file: str) -> str:
         """
-        Load and render SQL from a file with Jinja templating.
+        Load raw SQL from a file.
 
         First tries to find the file relative to the calling DAG's directory,
         then falls back to the configured sql_files_path.
@@ -156,8 +156,7 @@ class SQLDecorators:
         if os.path.isabs(sql_file):
             sql_path = Path(sql_file)
             if sql_path.exists():
-                file_obj = File(str(sql_path), variables=template_vars)
-                return file_obj.render()
+                return sql_path.read_text(encoding='utf-8')
             else:
                 raise FileNotFoundError(f'SQL file not found: {sql_file}')
 
@@ -174,8 +173,7 @@ class SQLDecorators:
                     )
                     relative_sql_path = os.path.join(caller_dir, sql_file)
                     if os.path.exists(relative_sql_path):
-                        file_obj = File(relative_sql_path, variables=template_vars)
-                        return file_obj.render()
+                        return Path(relative_sql_path).read_text(encoding='utf-8')
                     break
         finally:
             del frame
@@ -192,8 +190,7 @@ class SQLDecorators:
         for root in search_roots:
             candidate = (root / sql_file).resolve()
             if candidate.exists():
-                file_obj = File(str(candidate), variables=template_vars)
-                return file_obj.render()
+                return candidate.read_text(encoding='utf-8')
 
         searched = ', '.join(str(p) for p in search_roots)
         raise FileNotFoundError(
@@ -207,52 +204,31 @@ class SQLDecorators:
         kwargs: dict,
         sql_file_template_path: Optional[str] = None,
         **decorator_template_vars,
-    ) -> str:
+    ) -> tuple[str, dict[str, Any]]:
         """
         Process SQL input.
-        If sql_file_template_path is provided, it's loaded and rendered.
-        Otherwise, the decorated function is called;
-        its string return is treated as a template,
-        or a File object's render method is used.
-        All runtime arguments to the decorated function are made available to the
-        Jinja template. Airflow context (params, ds, ts, etc.) is also available
-        for direct use in templates like {% if params.username %}.
+        If sql_file_template_path is provided, raw SQL is loaded from the file.
+        Otherwise, the decorated function is called and its string return is
+        treated as a template. Runtime arguments are returned separately so
+        Airflow can render SQL with the task context at execution time.
         """
         final_template_vars = decorator_template_vars.copy()
         sig = inspect.signature(func)
         bound_args = sig.bind_partial(*args, **kwargs)
         bound_args.apply_defaults()
 
-        airflow_context = _get_airflow_context()
-        airflow_jinja_env = Environment(autoescape=False, undefined=Undefined)  # noqa: S701 Airflow templates are already values, not HTML
-
         for key, value in bound_args.arguments.items():
-            final_template_vars[key] = _render_airflow_templates(
-                value, airflow_context, airflow_jinja_env
-            )
-
-        final_template_vars.update(airflow_context)
+            final_template_vars[key] = value
 
         if sql_file_template_path:
-            return self._load_sql_from_file(
-                sql_file_template_path, **final_template_vars
-            )
+            return self._load_sql_from_file(sql_file_template_path), final_template_vars
         else:
             result = func(*args, **kwargs)
 
             if isinstance(result, str):
-                try:
-                    sql_template = self.string_jinja_env.from_string(result)
-                    return sql_template.render(**final_template_vars)
-                except Exception as e:
-                    raise ValueError(
-                        f'Error rendering SQL template from function {_get_func_name(func)}:\n'
-                        f'Error: {e}\n'
-                        f"Template: '''{result}'''\n"
-                        f'Variables: {final_template_vars}'
-                    ) from e
+                return result, final_template_vars
             elif isinstance(result, File):
-                return result.render(context=final_template_vars)
+                return result.read_content(), final_template_vars
             else:
                 raise ValueError(
                     f'Decorated function {_get_func_name(func)} '
@@ -287,7 +263,7 @@ class SQLDecorators:
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLQueryOperator  # noqa: PLC0415
 
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
@@ -314,6 +290,7 @@ class SQLDecorators:
                 operator = SQLQueryOperator(
                     task_id=_get_func_name(func),
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     output_table=output_table,
                     source_conn=source_conn,
                     dry_run_flag=dry_run,
@@ -352,7 +329,7 @@ class SQLDecorators:
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLAppendOperator  # noqa: PLC0415
 
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
@@ -368,6 +345,7 @@ class SQLDecorators:
                 operator = SQLAppendOperator(
                     task_id=_get_func_name(func),
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     output_table=output_table,
                     source_conn=source_conn,
                     dry_run_flag=dry_run,
@@ -404,17 +382,19 @@ class SQLDecorators:
             def wrapper(*args: Any, **kwargs: Any):
                 from airsql.operators import SQLDataFrameOperator  # noqa: PLC0415
 
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
                 operator = SQLDataFrameOperator(
                     task_id=f'{_get_func_name(func)}_internal',
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     source_conn=source_conn,
                 )
 
                 context = get_current_context()
+                operator.render_template_fields(context)
                 return operator.execute(context)
 
             return wrapper
@@ -451,7 +431,7 @@ class SQLDecorators:
                     SQLTruncateOperator,
                 )
 
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
@@ -468,6 +448,7 @@ class SQLDecorators:
                     operator = SQLTruncateOperator(
                         task_id=_get_func_name(func),
                         sql=sql_query,
+                        template_vars=runtime_template_vars,
                         output_table=output_table,
                         source_conn=source_conn,
                         dry_run_flag=dry_run,
@@ -477,6 +458,7 @@ class SQLDecorators:
                     operator = SQLReplaceOperator(
                         task_id=_get_func_name(func),
                         sql=sql_query,
+                        template_vars=runtime_template_vars,
                         output_table=output_table,
                         source_conn=source_conn,
                         dry_run_flag=dry_run,
@@ -517,7 +499,7 @@ class SQLDecorators:
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLTruncateOperator  # noqa: PLC0415
 
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
@@ -533,6 +515,7 @@ class SQLDecorators:
                 operator = SQLTruncateOperator(
                     task_id=_get_func_name(func),
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     output_table=output_table,
                     source_conn=source_conn,
                     dry_run_flag=dry_run,
@@ -577,7 +560,7 @@ class SQLDecorators:
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLMergeOperator  # noqa: PLC0415
 
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
@@ -593,6 +576,7 @@ class SQLDecorators:
                 operator = SQLMergeOperator(
                     task_id=_get_func_name(func),
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     output_table=output_table,
                     conflict_columns=conflict_columns,
                     update_columns=update_columns,
@@ -834,13 +818,14 @@ class SQLDecorators:
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLCheckOperator  # noqa: PLC0415
 
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
                 operator = SQLCheckOperator(
                     task_id=_get_func_name(func),
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     source_conn=connection_id,
                 )
 
@@ -877,7 +862,7 @@ class SQLDecorators:
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 from airsql.operators import SQLQueryOperator  # noqa: PLC0415
 
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
@@ -888,6 +873,7 @@ class SQLDecorators:
                 operator = SQLQueryOperator(
                     task_id=_get_func_name(func),
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     output_table=None,
                     source_conn=source_conn,
                     **op_kwargs,
@@ -956,7 +942,7 @@ class SQLDecorators:
                 )
 
                 # First, extract the data using SQL
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
@@ -964,10 +950,12 @@ class SQLDecorators:
                 dataframe_operator = SQLDataFrameOperator(
                     task_id=f'{_get_func_name(func)}_extract',
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     source_conn=source_conn,
                 )
 
                 context = get_current_context()
+                dataframe_operator.render_template_fields(context)
                 df = dataframe_operator.execute(context)
 
                 # Merge the DataFrame into the target table
@@ -1045,7 +1033,7 @@ class SQLDecorators:
                 )
 
                 # First, extract the data using SQL
-                sql_query = self._process_sql_input(
+                sql_query, runtime_template_vars = self._process_sql_input(
                     func, args, kwargs, sql_file, **template_vars
                 )
 
@@ -1053,10 +1041,12 @@ class SQLDecorators:
                 dataframe_operator = SQLDataFrameOperator(
                     task_id=f'{_get_func_name(func)}_extract',
                     sql=sql_query,
+                    template_vars=runtime_template_vars,
                     source_conn=source_conn,
                 )
 
                 context = get_current_context()
+                dataframe_operator.render_template_fields(context)
                 df = dataframe_operator.execute(context)
 
                 # Load the DataFrame into the target table
