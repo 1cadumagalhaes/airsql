@@ -38,11 +38,10 @@ class BigQuerySqlSensor(SqlSensor):
         """
         self.poke_count += 1
         hook = self._get_hook()
-        try:
-            records = hook.get_records(self.sql, timeout=BIGQUERY_SENSOR_TIMEOUT)
-        except Exception:
-            records = None
-        super_poke = bool(records)
+        client = hook.get_client()
+        query_job = client.query(self.sql, location=self.location)
+        query_job.result(timeout=BIGQUERY_SENSOR_TIMEOUT)
+        super_poke = query_job.total_rows > 0
         retries = self.retries if isinstance(self.retries, int) else 0
         if not super_poke and self.poke_count > retries:
             raise AirflowSkipException('Skipping task because poke returned False.')

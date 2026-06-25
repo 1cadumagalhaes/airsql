@@ -126,11 +126,18 @@ class TestBigQuerySqlSensor:
             conn_id='bigquery_conn',
         )
         context: dict[str, Any] = {}
-        sensor.poke(context)
-        assert sensor.poke_count == 1
-        with pytest.raises(AirflowSkipException):
+        mock_query_job = MagicMock()
+        mock_query_job.total_rows = 0
+        mock_client = MagicMock()
+        mock_client.query.return_value = mock_query_job
+        mock_hook = MagicMock()
+        mock_hook.get_client.return_value = mock_client
+        with patch.object(sensor, '_get_hook', return_value=mock_hook):
             sensor.poke(context)
-        assert sensor.poke_count == 2
+            assert sensor.poke_count == 1
+            with pytest.raises(AirflowSkipException):
+                sensor.poke(context)
+            assert sensor.poke_count == 2
 
     def test_get_hook_returns_bigquery_hook(self) -> None:
         with patch(
