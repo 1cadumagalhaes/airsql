@@ -39,7 +39,9 @@ class BigQuerySqlSensor(SqlSensor):
         self.poke_count += 1
         hook = self._get_hook()
         client = hook.get_client()
-        query_job = client.query(self.sql, location=self.location)
+        query_job = client.query(
+            self.sql, location=hook.location, project=hook.project_id
+        )
         results = query_job.result(timeout=BIGQUERY_SENSOR_TIMEOUT)
         super_poke = results.total_rows > 0
         retries = self.retries if isinstance(self.retries, int) else 0
