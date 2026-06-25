@@ -126,8 +126,10 @@ class TestBigQuerySqlSensor:
             conn_id='bigquery_conn',
         )
         context: dict[str, Any] = {}
+        mock_results = MagicMock()
+        mock_results.total_rows = 0
         mock_query_job = MagicMock()
-        mock_query_job.total_rows = 0
+        mock_query_job.result.return_value = mock_results
         mock_client = MagicMock()
         mock_client.query.return_value = mock_query_job
         mock_hook = MagicMock()
