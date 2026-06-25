@@ -1068,22 +1068,16 @@ class PostgresToGCSOperator(BaseOperator):
                 # Determine Postgres metadata mapping for columns if available
                 postgres_type_map = None
                 try:
-                    # Use a helper query to obtain column types for the SQL used.
-                    # We try to build a temporary query that uses the original SQL as subquery
-                    # and inspects its columns using pg_type and information_schema.
-                    # This is a best-effort approach and may be skipped if the SQL is complex.
                     type_query = f'SELECT * FROM ({self.sql}) AS subquery LIMIT 0'  # noqa: S608
                     conn = pg_hook.get_conn()
                     cur = conn.cursor()
+                    cur.execute('SET statement_timeout = 30000')
                     cur.execute(type_query)
-                    # cursor.description provides type_code; map via pg_type
                     desc = cur.description
                     col_names = [d[0] for d in desc]
                     postgres_type_map = {}
                     for i, d in enumerate(desc):
-                        # d[1] is type_code per DB-API
                         type_oid = d[1]
-                        # Query pg_type to get name and array/elem info
                         cur2 = conn.cursor()
                         cur2.execute(
                             'SELECT typname, typtype, typelem, typcategory FROM pg_type WHERE oid = %s',
