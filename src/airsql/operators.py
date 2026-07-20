@@ -7,11 +7,10 @@ from typing import Any, List, Optional
 
 import pandas as pd
 import pyarrow as pa
-from airflow.models import BaseOperator
 from airflow.providers.common.sql.operators.sql import (
     SQLCheckOperator as BaseSQLCheckOperator,
 )
-from airflow.sdk import Context
+from airflow.sdk import BaseOperator, Context
 from jinja2 import Environment
 
 from airsql.hooks import SQLHookManager
@@ -25,7 +24,7 @@ def _sanitize_template_values(value: Any) -> Any:
         return {key: _sanitize_template_values(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_sanitize_template_values(item) for item in value]
-    if value in {'None', 'null', ''}:
+    if isinstance(value, str) and value in {'None', 'null', ''}:
         return None
     return value
 

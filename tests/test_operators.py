@@ -15,6 +15,7 @@ from airsql.operators import (
     SQLQueryOperator,
     SQLReplaceOperator,
     SQLTruncateOperator,
+    _sanitize_template_values,
 )
 from tests.fixtures.data import (
     CONN_ID,
@@ -29,6 +30,24 @@ CONTEXT: dict[str, Any] = {}
 
 
 class TestBaseSQLOperator:
+    def test_template_sanitizer_preserves_unhashable_values(self) -> None:
+        table = TABLE_SIMPLE
+
+        sanitized = _sanitize_template_values({'table': table, 'nested': [table]})
+
+        assert sanitized == {'table': table, 'nested': [table]}
+
+    def test_template_sanitizer_converts_null_strings(self) -> None:
+        assert _sanitize_template_values({
+            'none': 'None',
+            'null': 'null',
+            'empty': '',
+        }) == {
+            'none': None,
+            'null': None,
+            'empty': None,
+        }
+
     def test_instantiation(self) -> None:
         op = BaseSQLOperator(task_id='test_task', sql=SQL_SIMPLE, source_conn=CONN_ID)
         assert op.task_id == 'test_task'

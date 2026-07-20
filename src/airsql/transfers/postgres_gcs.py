@@ -12,9 +12,9 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 import pyarrow as pa
-from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.sdk import BaseOperator
 
 from airsql.enums import PostgresExportFormat, SchemaDetectionMode
 from airsql.utils import DataValidator, OperationSummary, ValidationResult

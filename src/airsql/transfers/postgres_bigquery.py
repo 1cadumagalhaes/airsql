@@ -5,9 +5,8 @@ and asset emission.
 
 from typing import Any, Iterable, List, Optional
 
-from airflow.models import BaseOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.sdk import Asset, Context
+from airflow.sdk import Asset, BaseOperator, Context
 
 from airsql.enums import (
     CreateDisposition,

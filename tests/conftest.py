@@ -170,6 +170,7 @@ def _make_module(name: str, **attrs: Any) -> ModuleType:
 _make_module('airflow')
 _make_module(
     'airflow.sdk',
+    BaseOperator=_BaseOperator,
     get_current_context=_get_current_context,
     task=_task,
     Asset=_Asset,
@@ -179,6 +180,7 @@ _make_module('airflow.sdk.bases')
 _make_module('airflow.sdk.bases.hook', BaseHook=_BaseHook)
 _make_module('airflow.models', BaseOperator=_BaseOperator)
 _make_module('airflow.exceptions', AirflowSkipException=Exception)
+_make_module('airflow.sdk.exceptions', AirflowSkipException=Exception)
 _make_module('airflow.providers')
 _make_module('airflow.providers.common')
 _make_module('airflow.providers.common.sql')

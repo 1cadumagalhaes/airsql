@@ -2,7 +2,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from airflow.exceptions import AirflowSkipException
+from airflow.sdk.exceptions import AirflowSkipException
 
 from airsql.sensors import BigQuerySqlSensor, PostgresSqlSensor
 

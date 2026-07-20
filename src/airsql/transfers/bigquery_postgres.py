@@ -1,8 +1,7 @@
 import fnmatch
 from typing import Any, List, Optional, Set
 
-from airflow.models import BaseOperator
-from airflow.sdk import Asset, Context
+from airflow.sdk import Asset, BaseOperator, Context
 
 from airsql.enums import BigQueryExportFormat
 

@@ -1,5 +1,5 @@
-from airflow.exceptions import AirflowSkipException
 from airflow.providers.common.sql.sensors.sql import SqlSensor
+from airflow.sdk.exceptions import AirflowSkipException
 
 BIGQUERY_SENSOR_TIMEOUT = 300
 

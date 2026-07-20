@@ -77,7 +77,7 @@ def _sanitize_airflow_params(params: dict) -> dict:
                 _sanitize_airflow_params(item) if isinstance(item, dict) else item
                 for item in value
             ]
-        elif value in {'None', 'null'}:
+        elif isinstance(value, str) and value in {'None', 'null'}:
             sanitized[key] = None
         else:
             sanitized[key] = value

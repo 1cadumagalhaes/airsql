@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from airsql.decorators import SQLDecorators
+from airsql.decorators import SQLDecorators, _sanitize_airflow_params
 from airsql.operators import (
     DataFrameLoadOperator,
     DataFrameMergeOperator,
@@ -20,6 +20,14 @@ from tests.fixtures.data import (
 )
 
 sql = SQLDecorators()
+
+
+def test_airflow_param_sanitizer_preserves_unhashable_values() -> None:
+    table = TABLE_SIMPLE
+
+    sanitized = _sanitize_airflow_params({'table': table, 'nested': [table]})
+
+    assert sanitized == {'table': table, 'nested': [table]}
 
 
 def _render_op(op, context: dict | None = None):

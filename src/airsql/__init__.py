@@ -13,12 +13,12 @@ A decorator-based SQL execution framework for Airflow that provides:
 # Workaround for Airflow bug: pandas 3.x uses 'pandas.DataFrame' but serializer
 # is registered with 'pandas.core.frame.DataFrame'. Add alias for compatibility.
 try:
-    from airflow.serialization.serde import (  # noqa: PLC0415
+    from airflow.sdk.serde import (  # noqa: PLC0415
         _deserializers,
         _extra_allowed,
         _serializers,
     )
-    from airflow.serialization.serializers import (  # noqa: PLC0415
+    from airflow.sdk.serde.serializers import (  # noqa: PLC0415
         pandas as pd_serializer,
     )
 

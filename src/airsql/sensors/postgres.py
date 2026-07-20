@@ -1,6 +1,6 @@
-from airflow.exceptions import AirflowSkipException
 from airflow.providers.common.sql.sensors.sql import SqlSensor
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.sdk.exceptions import AirflowSkipException
 
 
 class PostgresSqlSensor(SqlSensor):

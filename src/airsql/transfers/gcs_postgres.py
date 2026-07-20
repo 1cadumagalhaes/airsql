@@ -6,9 +6,9 @@ import time
 from io import BytesIO, StringIO
 from typing import Any, Optional
 
-from airflow.models import BaseOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.sdk import BaseOperator
 
 from airsql.utils import DataValidator, OperationSummary
 
