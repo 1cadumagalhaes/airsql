@@ -267,8 +267,10 @@ class PostgresToGCSOperator(BaseOperator):
             are 'csv', 'parquet', and 'jsonl'. Defaults to 'csv'.
         schema_filename: If set, a GCS file with the schema will be uploaded.
         schema_overrides: BigQuery type overrides by top-level field name.
-        pandas_chunksize: The number of rows to include in each chunk
-            processed by pandas.
+         pandas_chunksize: The number of rows to include in each chunk
+             processed by pandas.
+        shard_size_mb: Optional maximum size for each uploaded shard. When set,
+            the returned filename is a wildcard matching all generated shards.
         use_copy: If True, use PostgreSQL COPY command for streaming.
         use_temp_file: If True, use a temporary file instead of streaming.
         csv_kwargs: Arguments to pass to pandas.DataFrame.to_csv().
@@ -311,6 +313,7 @@ class PostgresToGCSOperator(BaseOperator):
         schema_filename: Optional[str] = None,
         schema_overrides: Optional[Dict[str, str]] = None,
         pandas_chunksize: Optional[int] = None,
+        shard_size_mb: Optional[float] = None,
         use_copy: bool = False,
         use_temp_file: bool = False,
         csv_kwargs: Optional[dict] = None,
@@ -347,6 +350,9 @@ class PostgresToGCSOperator(BaseOperator):
         self.schema_filename = schema_filename
         self.schema_overrides = schema_overrides or {}
         self.pandas_chunksize = pandas_chunksize
+        if shard_size_mb is not None and shard_size_mb <= 0:
+            raise ValueError('shard_size_mb must be greater than zero')
+        self.shard_size_mb = shard_size_mb
         self.use_copy = use_copy
         self.use_temp_file = use_temp_file
         self.csv_kwargs = csv_kwargs or {}
@@ -913,6 +919,38 @@ class PostgresToGCSOperator(BaseOperator):
 
             first_chunk = True
             parquet_writer = None
+            shard_number = 0
+            uploaded_shards = []
+            uploaded_bytes = 0
+            shard_size_bytes = (
+                self.shard_size_mb * 1024 * 1024
+                if self.shard_size_mb is not None
+                else None
+            )
+            filename_root, filename_extension = os.path.splitext(self.filename)
+
+            def upload_completed_shard():
+                nonlocal shard_number, tmp_path, parquet_writer, uploaded_bytes
+                if parquet_writer:
+                    parquet_writer.close()
+                    parquet_writer = None
+                shard_name = (
+                    f'{filename_root}-{shard_number:05d}{filename_extension}'
+                )
+                shard_bytes = os.path.getsize(tmp_path)
+                gcs_hook.upload(
+                    bucket_name=self.bucket,
+                    object_name=shard_name,
+                    filename=tmp_path,
+                    mime_type=mime_type,
+                )
+                uploaded_shards.append(shard_name)
+                uploaded_bytes += shard_bytes
+                os.remove(tmp_path)
+                shard_number += 1
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                tmp_path = tmp.name
+                tmp.close()
             try:
                 if export_format == 'parquet':
                     import pyarrow.parquet as pq  # noqa: PLC0415
@@ -925,6 +963,14 @@ class PostgresToGCSOperator(BaseOperator):
                 ):
                     if chunk.empty:
                         continue
+
+                    if (
+                        shard_size_bytes is not None
+                        and not first_chunk
+                        and os.path.getsize(tmp_path) >= shard_size_bytes
+                    ):
+                        upload_completed_shard()
+                        first_chunk = True
 
                     fixed_chunk = self._fix_timestamp_precision(chunk)
                     rows_extracted += len(fixed_chunk)
@@ -985,6 +1031,7 @@ class PostgresToGCSOperator(BaseOperator):
 
                 if parquet_writer:
                     parquet_writer.close()
+                    parquet_writer = None
 
             except Exception as e:
                 if parquet_writer:
@@ -1015,7 +1062,11 @@ class PostgresToGCSOperator(BaseOperator):
             self.log.info(
                 f'Extracted {_format_number(rows_extracted)} rows from Postgres.'
             )
-            file_size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
+            if uploaded_shards:
+                self.filename = f'{filename_root}-*{filename_extension}'
+            file_size_mb = (
+                uploaded_bytes + os.path.getsize(tmp_path)
+            ) / (1024 * 1024)
             validation_result = ValidationResult(is_valid=True)
         else:
             df = pd.read_sql(final_query, engine, dtype_backend='pyarrow')
@@ -1185,14 +1236,31 @@ class PostgresToGCSOperator(BaseOperator):
             )
             # If we streamed into a temp file, upload from file to avoid huge memory usage
             if tmp_path:
-                try:
+                if uploaded_shards:
+                    shard_name = f'{filename_root}-{shard_number:05d}{filename_extension}'
                     gcs_hook.upload(
                         bucket_name=self.bucket,
-                        object_name=self.filename,
+                        object_name=shard_name,
                         filename=tmp_path,
                         mime_type=mime_type,
                     )
-                finally:
+                    uploaded_shards.append(shard_name)
+                else:
+                    try:
+                        gcs_hook.upload(
+                            bucket_name=self.bucket,
+                            object_name=self.filename,
+                            filename=tmp_path,
+                            mime_type=mime_type,
+                        )
+                    finally:
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            self.log.debug(
+                                'Failed to remove temporary file: %s', tmp_path
+                            )
+                if uploaded_shards:
                     try:
                         os.remove(tmp_path)
                     except Exception:

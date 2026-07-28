@@ -29,6 +29,7 @@ export = PostgresToGCSOperator(
 | `export_format` | `str` | No | csv, jsonl, parquet (default: csv) |
 | `schema_filename` | `str` | No | Path for BigQuery schema JSON |
 | `pandas_chunksize` | `int` | No | Rows per chunk for large exports; omitted preserves the existing full-query path |
+| `shard_size_mb` | `float` | No | Maximum uploaded shard size when chunked extraction is enabled |
 | `use_copy` | `bool` | No | Use PostgreSQL COPY for streaming |
 | `use_temp_file` | `bool` | No | Use temp file instead of streaming |
 | `csv_kwargs` | `dict` | No | Additional pandas CSV options |

@@ -32,6 +32,7 @@ transfer = PostgresToBigQueryOperator(
 | `schema_filename` | `str` | No | Path for BigQuery schema JSON |
 | `schema_overrides` | `dict[str, str]` | No | Override inferred BigQuery types by field name |
 | `pandas_chunksize` | `int` | No | Rows per chunk for large exports |
+| `shard_size_mb` | `float` | No | Maximum uploaded shard size when chunked extraction is enabled |
 | `use_copy` | `bool` | No | Use COPY for streaming (default: False) |
 | `write_disposition` | `str` | No | WRITE_TRUNCATE, WRITE_APPEND (default: WRITE_TRUNCATE) |
 | `partition_by` | `str` | No | Partition column for BigQuery |
