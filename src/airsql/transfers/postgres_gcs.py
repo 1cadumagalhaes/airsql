@@ -353,6 +353,11 @@ class PostgresToGCSOperator(BaseOperator):
         self.pandas_chunksize = pandas_chunksize
         if shard_size_mb is not None and shard_size_mb <= 0:
             raise ValueError('shard_size_mb must be greater than zero')
+        if shard_size_mb is not None and (pandas_chunksize is None or use_copy):
+            raise ValueError(
+                'shard_size_mb requires pandas_chunksize and is not supported '
+                'with use_copy'
+            )
         self.shard_size_mb = shard_size_mb
         self.use_copy = use_copy
         self.use_temp_file = use_temp_file
@@ -957,7 +962,12 @@ class PostgresToGCSOperator(BaseOperator):
                 delete_shards(existing_shards)
 
             def upload_completed_shard():
-                nonlocal shard_number, tmp_path, parquet_writer, uploaded_bytes
+                nonlocal \
+                    first_chunk, \
+                    shard_number, \
+                    tmp_path, \
+                    parquet_writer, \
+                    uploaded_bytes
                 if parquet_writer:
                     parquet_writer.close()
                     parquet_writer = None
@@ -978,6 +988,7 @@ class PostgresToGCSOperator(BaseOperator):
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
                 tmp_path = tmp.name
                 tmp.close()
+                first_chunk = True
 
             try:
                 if export_format == 'parquet':
@@ -991,14 +1002,6 @@ class PostgresToGCSOperator(BaseOperator):
                 ):
                     if chunk.empty:
                         continue
-
-                    if (
-                        shard_size_bytes is not None
-                        and not first_chunk
-                        and os.path.getsize(tmp_path) >= shard_size_bytes
-                    ):
-                        upload_completed_shard()
-                        first_chunk = True
 
                     fixed_chunk = self._fix_timestamp_precision(chunk)
                     rows_extracted += len(fixed_chunk)
@@ -1056,6 +1059,11 @@ class PostgresToGCSOperator(BaseOperator):
                         mime_type = 'application/octet-stream'
 
                     first_chunk = False
+                    if (
+                        shard_size_bytes is not None
+                        and os.path.getsize(tmp_path) >= shard_size_bytes
+                    ):
+                        upload_completed_shard()
 
                 if parquet_writer:
                     parquet_writer.close()
@@ -1264,7 +1272,7 @@ class PostgresToGCSOperator(BaseOperator):
             )
             # If we streamed into a temp file, upload from file to avoid huge memory usage
             if tmp_path:
-                if uploaded_shards:
+                if uploaded_shards and not first_chunk:
                     shard_name = (
                         f'{filename_root}-{shard_number:05d}{filename_extension}'
                     )
@@ -1280,7 +1288,7 @@ class PostgresToGCSOperator(BaseOperator):
                     except Exception:
                         delete_shards(uploaded_shard_names)
                         raise
-                else:
+                elif not uploaded_shards:
                     try:
                         gcs_hook.upload(
                             bucket_name=self.bucket,
