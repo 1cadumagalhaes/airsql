@@ -2,8 +2,10 @@ import fnmatch
 import hashlib
 import importlib
 import json
+import tempfile
 import time
 from io import BytesIO, StringIO
+from itertools import chain
 from typing import Any, Optional
 
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
@@ -103,6 +105,7 @@ class GCSToPostgresOperator(BaseOperator):
         postgres_type_overrides: Optional[dict] = None,
         audit_cols_to_exclude=None,
         dry_run: bool = False,
+        batch_size: Optional[int] = None,
         *args,
         **kwargs,
     ):
@@ -121,6 +124,9 @@ class GCSToPostgresOperator(BaseOperator):
         self.source_schema = source_schema
         self.postgres_type_overrides = postgres_type_overrides or {}
         self._skip_execution = dry_run
+        if batch_size is not None and batch_size < 1:
+            raise ValueError('batch_size must be greater than zero')
+        self.batch_size = batch_size
         self.audit_cols_to_exclude = audit_cols_to_exclude or {
             'criado_em',
             'atualizado_em',
@@ -394,6 +400,15 @@ class GCSToPostgresOperator(BaseOperator):
 
         file_format = self._detect_file_format(self.object_name)
         object_names = self._resolve_object_names(gcs_hook)
+        if self.batch_size and not self.conflict_columns and not self.partition_column:
+            return self._execute_batched(
+                context,
+                gcs_hook,
+                pg_hook,
+                object_names,
+                file_format,
+                start_time,
+            )
         df = self._read_dataframe_from_gcs_objects(gcs_hook, object_names, file_format)
 
         if '.' in self.target_table_name:
@@ -563,6 +578,176 @@ class GCSToPostgresOperator(BaseOperator):
             )
 
         self.log.info(summary.to_log_summary())
+
+    def _iter_dataframes_from_gcs_objects(
+        self, gcs_hook, object_names: list[str], file_format: str
+    ):
+        """Yield bounded DataFrames from GCS objects without retaining objects."""
+        import pandas as pd  # noqa: PLC0415
+
+        for object_name in object_names:
+            suffix = f'.{file_format}'
+            with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+                gcs_hook.download(
+                    bucket_name=self.bucket_name,
+                    object_name=object_name,
+                    filename=tmp.name,
+                )
+                if file_format == 'parquet':
+                    import pyarrow.parquet as pq  # noqa: PLC0415
+
+                    parquet_file = pq.ParquetFile(tmp.name)
+                    for record_batch in parquet_file.iter_batches(
+                        batch_size=self.batch_size
+                    ):
+                        yield record_batch.to_pandas()
+                elif file_format == 'csv':
+                    yield from pd.read_csv(
+                        tmp.name,
+                        chunksize=self.batch_size,
+                        dtype_backend='pyarrow',
+                    )
+                elif file_format == 'jsonl':
+                    yield from pd.read_json(
+                        tmp.name,
+                        lines=True,
+                        chunksize=self.batch_size,
+                        dtype_backend='pyarrow',
+                    )
+                else:
+                    # Preserve Avro support until a streaming Avro reader is added.
+                    with open(tmp.name, 'rb') as file_obj:
+                        yield self._read_dataframe_from_bytes(
+                            file_obj.read(), file_format
+                        )
+
+    def _execute_batched(
+        self,
+        context,
+        gcs_hook,
+        pg_hook,
+        object_names: list[str],
+        file_format: str,
+        start_time: float,
+    ):
+        """Load append/replace data one bounded batch at a time."""
+        import pandas as pd  # noqa: PLC0415
+
+        if '.' in self.target_table_name:
+            schema, table_name_simple = self.target_table_name.split('.', 1)
+        else:
+            schema, table_name_simple = 'public', self.target_table_name
+        table_name_full = f'{schema}.{table_name_simple}'
+        table_exists = self._table_exists(pg_hook, schema, table_name_simple)
+        batches = self._iter_dataframes_from_gcs_objects(
+            gcs_hook, object_names, file_format
+        )
+        first_batch = next(batches, None)
+        if first_batch is None or first_batch.empty:
+            self.log.info('Source file is empty. No data to load.')
+            return table_name_full
+
+        if not table_exists:
+            if not self.create_if_missing:
+                raise ValueError(
+                    f'Table {table_name_full} does not exist. '
+                    'Either create the table first or set create_if_missing=True.'
+                )
+            if self._skip_execution:
+                table_exists = True
+            else:
+                self._create_table_from_dataframe(
+                    pg_hook, schema, table_name_simple, first_batch
+                )
+                table_exists = True
+
+        column_records = pg_hook.get_records(
+            """
+            SELECT column_name, data_type FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+            ORDER BY ordinal_position;
+            """,
+            parameters=(schema, table_name_simple),
+        )
+        if not column_records:
+            raise ValueError(f'Could not retrieve column information for {table_name_full}.')
+        model_columns = [record[0] for record in column_records]
+        column_types = {record[0]: record[1] for record in column_records}
+        common_columns = [col for col in first_batch.columns if col in model_columns]
+        json_columns = self._detect_json_columns(pg_hook, schema, table_name_simple)
+
+        conn = None
+        cursor = None
+        total_rows = 0
+        validation_errors = []
+        validation_warnings = []
+        try:
+            if not self._skip_execution:
+                conn = pg_hook.get_conn()
+                cursor = conn.cursor()
+                sql_mod = _get_sql_module(conn)
+                if self.replace:
+                    table_identifier = sql_mod.Identifier(schema, table_name_simple)
+                    cursor.execute(
+                        sql_mod.SQL('TRUNCATE TABLE {table}').format(
+                            table=table_identifier
+                        ).as_string(cursor)
+                    )
+
+            for batch in chain((first_batch,), batches):
+                if batch.empty:
+                    continue
+                filtered = batch[common_columns].where(
+                    pd.notna(batch[common_columns]), None
+                )
+                filtered = self._coerce_column_types(filtered, column_types)
+                if json_columns and file_format == 'jsonl':
+                    filtered = self._fix_json_quoting(filtered, json_columns)
+                validation = DataValidator.validate_columns(
+                    filtered, expected_columns=common_columns
+                )
+                validation_errors.extend(validation.errors)
+                validation_warnings.extend(validation.warnings)
+                total_rows += len(filtered)
+                if not self._skip_execution:
+                    filtered = self._convert_json_columns_to_strings(filtered)
+                    self._insert_dataframe_rows(
+                        cursor,
+                        conn,
+                        sql_mod,
+                        schema,
+                        table_name_simple,
+                        filtered,
+                    )
+
+            if not self._skip_execution:
+                conn.commit()
+        except Exception:
+            if conn is not None:
+                conn.rollback()
+            raise
+        finally:
+            if cursor is not None:
+                cursor.close()
+            if conn is not None:
+                conn.close()
+
+        operation_type = 'replace' if self.replace else 'append'
+        summary = OperationSummary(
+            operation_type=operation_type,
+            rows_extracted=total_rows,
+            rows_loaded=total_rows if not self._skip_execution else 0,
+            duration_seconds=time.time() - start_time,
+            file_size_mb=self._get_total_file_size_mb(gcs_hook, object_names),
+            format_used=file_format,
+            validation_errors=validation_errors,
+            validation_warnings=validation_warnings,
+            dry_run=self._skip_execution,
+        )
+        self.log.info(summary.to_log_summary())
+        if not self._skip_execution:
+            self._grant_table_privileges(pg_hook, schema, table_name_simple)
+        return table_name_full
 
     def _truncate_and_insert_data(
         self, pg_hook, schema, table_name_simple, df_filtered
