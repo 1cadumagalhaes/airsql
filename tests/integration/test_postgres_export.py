@@ -1188,7 +1188,9 @@ class TestPostgresExportShards:
 
         uploads = {}
 
-        def capture_upload(bucket_name, object_name, data=None, filename=None, **kwargs):
+        def capture_upload(
+            bucket_name, object_name, data=None, filename=None, **kwargs
+        ):
             if filename:
                 with open(filename, 'rb') as file_obj:
                     uploads[object_name] = file_obj.read()
@@ -1208,8 +1210,9 @@ class TestPostgresExportShards:
             shard_size_mb=0.000001,
         )
 
-        with patch('airsql.transfers.postgres_gcs.PostgresHook') as mock_pg, patch(
-            'airsql.transfers.postgres_gcs.GCSHook', return_value=mock_gcs
+        with (
+            patch('airsql.transfers.postgres_gcs.PostgresHook') as mock_pg,
+            patch('airsql.transfers.postgres_gcs.GCSHook', return_value=mock_gcs),
         ):
             mock_pg.return_value.get_sqlalchemy_engine.return_value = pg_engine
             mock_pg.return_value.get_records.return_value = []

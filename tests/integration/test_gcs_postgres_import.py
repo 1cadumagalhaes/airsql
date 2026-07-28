@@ -1401,16 +1401,18 @@ class TestRoundTrip:
 
 
 class TestBatchPartitionExchange:
-    def test_partition_exchange_stages_multiple_batches(self, pg_engine, real_postgres_hook):
+    def test_partition_exchange_stages_multiple_batches(
+        self, pg_engine, real_postgres_hook
+    ):
         from unittest.mock import MagicMock, patch
 
         from airsql.transfers.gcs_postgres import GCSToPostgresOperator
 
-        csv_data = b'''partition_date,name
+        csv_data = b"""partition_date,name
 2024-01-01,Alice
 2024-01-01,Bob
 2024-01-02,Carol
-'''
+"""
         op = GCSToPostgresOperator(
             task_id='test_partition_batch',
             target_table_name='partitioned_import',
