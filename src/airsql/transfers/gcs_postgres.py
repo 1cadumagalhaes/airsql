@@ -642,8 +642,24 @@ class GCSToPostgresOperator(BaseOperator):
         batches = self._iter_dataframes_from_gcs_objects(
             gcs_hook, object_names, file_format
         )
-        first_batch = next(batches, None)
-        if first_batch is None or first_batch.empty:
+        first_batch = None
+        empty_batch = None
+        for candidate in batches:
+            if candidate.empty:
+                empty_batch = candidate
+                continue
+            first_batch = candidate
+            break
+        if first_batch is None:
+            if (
+                empty_batch is not None
+                and self.create_if_empty
+                and not table_exists
+                and not self._skip_execution
+            ):
+                self._create_empty_table_from_schema(
+                    pg_hook, schema, table_name_simple, empty_batch
+                )
             self.log.info('Source file is empty. No data to load.')
             return table_name_full
 
