@@ -33,7 +33,7 @@ transfer = BigQueryToPostgresOperator(
 | `check_source_exists` | `bool` | No | Validate source exists (default: True) |
 | `auto_detect_json_columns` | `bool` | No | Auto-detect JSON columns (default: True) |
 | `postgres_type_overrides` | `dict[str, str]` | No | Per-column PostgreSQL type hints used when creating destination tables |
-| `batch_size` | `int` | No | Rows read and loaded per batch by the delegated GCS import; omitted preserves the existing path |
+| `batch_size` | `int` | No | Rows read and loaded per batch by the delegated GCS import (default: 50000) |
 | `cleanup_temp_files` | `bool` | No | Clean up GCS temp files (default: True) |
 | `dry_run` | `bool` | No | Simulate without writing (default: False) |
 

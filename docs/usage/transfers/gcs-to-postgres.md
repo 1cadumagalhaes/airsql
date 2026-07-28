@@ -33,7 +33,7 @@ import_data = GCSToPostgresOperator(
 | `grant_table_privileges` | `bool` | No | Grant ALL privileges to PUBLIC (default: True) |
 | `source_schema` | `dict` | No | Source column types for type coercion |
 | `postgres_type_overrides` | `dict[str, str]` | No | Per-column PostgreSQL type hints used when creating destination tables |
-| `batch_size` | `int` | No | Rows read and loaded per batch for append/replace imports; omitted preserves the existing path |
+| `batch_size` | `int` | No | Rows read and loaded per batch for append/replace imports (default: 50000) |
 | `dry_run` | `bool` | No | Simulate without writing |
 
 ## Examples

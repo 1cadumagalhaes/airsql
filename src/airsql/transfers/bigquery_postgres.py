@@ -120,7 +120,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
         dry_run: bool = False,
-        batch_size: Optional[int] = None,
+        batch_size: Optional[int] = 50000,
         **kwargs,
     ):
         super().__init__(**kwargs)

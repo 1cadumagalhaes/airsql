@@ -105,7 +105,7 @@ class GCSToPostgresOperator(BaseOperator):
         postgres_type_overrides: Optional[dict] = None,
         audit_cols_to_exclude=None,
         dry_run: bool = False,
-        batch_size: Optional[int] = None,
+        batch_size: Optional[int] = 50000,
         *args,
         **kwargs,
     ):
