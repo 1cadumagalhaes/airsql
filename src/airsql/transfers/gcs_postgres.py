@@ -1495,7 +1495,6 @@ class GCSToPostgresOperator(BaseOperator):
                 partition_value_str.replace('-', '').replace(' ', '_').replace(':', '')
             )
             partition_name = f'{table_name}_{partition_value_safe}'
-            full_parent_table = f'{schema}.{table_name}' if schema else table_name
             full_partition = f'{schema}.{partition_name}' if schema else partition_name
 
             df_partition = df[df[self.partition_column] == partition_value]
@@ -1513,12 +1512,21 @@ class GCSToPostgresOperator(BaseOperator):
             sql_mod = _get_sql_module(conn)
 
             try:
-                cursor.execute(f'DROP TABLE IF EXISTS {temp_table_name}')
+                temp_identifier = sql_mod.Identifier(temp_table_name)
+                parent_identifier = sql_mod.Identifier(schema, table_name)
+                partition_identifier = sql_mod.Identifier(partition_name)
+                cursor.execute(
+                    sql_mod.SQL('DROP TABLE IF EXISTS {table}').format(
+                        table=temp_identifier
+                    )
+                )
                 conn.commit()
 
                 cursor.execute(
-                    f'CREATE TEMP TABLE {temp_table_name} '
-                    f'(LIKE {full_parent_table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS)'
+                    sql_mod.SQL(
+                        'CREATE TEMP TABLE {temp} '
+                        '(LIKE {parent} INCLUDING DEFAULTS INCLUDING CONSTRAINTS)'
+                    ).format(temp=temp_identifier, parent=parent_identifier)
                 )
                 conn.commit()
 
@@ -1545,10 +1553,19 @@ class GCSToPostgresOperator(BaseOperator):
                 if partition_exists:
                     self.log.info(f'Detaching existing partition {full_partition}')
                     cursor.execute(
-                        f'ALTER TABLE {full_parent_table} DETACH PARTITION {full_partition}'
+                        sql_mod.SQL(
+                            'ALTER TABLE {parent} DETACH PARTITION {partition}'
+                        ).format(
+                            parent=parent_identifier,
+                            partition=partition_identifier,
+                        )
                     )
                     self.log.info(f'Dropping old partition {full_partition}')
-                    cursor.execute(f'DROP TABLE IF EXISTS {full_partition}')
+                    cursor.execute(
+                        sql_mod.SQL('DROP TABLE IF EXISTS {partition}').format(
+                            partition=partition_identifier
+                        )
+                    )
                     conn.commit()
 
                 partition_start = self._stringify_partition_bound(partition_value)
@@ -1559,17 +1576,26 @@ class GCSToPostgresOperator(BaseOperator):
                 partition_end_sql = self._quote_sql_literal(partition_end)
 
                 cursor.execute(
-                    f"""
-                    CREATE TABLE {full_partition} PARTITION OF {full_parent_table}
-                    FOR VALUES FROM ({partition_start_sql}::{partition_pg_type})
-                    TO ({partition_end_sql}::{partition_pg_type})
-                    """
+                    sql_mod.SQL(
+                        'CREATE TABLE {partition} PARTITION OF {parent} '
+                        'FOR VALUES FROM ({start}::{type}) '
+                        'TO ({end}::{type})'
+                    ).format(
+                        partition=partition_identifier,
+                        parent=parent_identifier,
+                        start=sql_mod.SQL(partition_start_sql),
+                        end=sql_mod.SQL(partition_end_sql),
+                        type=sql_mod.SQL(partition_pg_type),
+                    )
                 )
                 conn.commit()
 
                 self.log.info(f'Inserting data into partition {full_partition}')
                 cursor.execute(
-                    f'INSERT INTO {full_partition} SELECT * FROM {temp_table_name}'
+                    sql_mod.SQL('INSERT INTO {partition} SELECT * FROM {temp}').format(
+                        partition=partition_identifier,
+                        temp=temp_identifier,
+                    )
                 )
 
                 conn.commit()
@@ -1582,7 +1608,11 @@ class GCSToPostgresOperator(BaseOperator):
                 )
                 raise
             finally:
-                cursor.execute(f'DROP TABLE IF EXISTS {temp_table_name}')
+                cursor.execute(
+                    sql_mod.SQL('DROP TABLE IF EXISTS {table}').format(
+                        table=temp_identifier
+                    )
+                )
                 conn.commit()
             cursor.close()
             conn.close()

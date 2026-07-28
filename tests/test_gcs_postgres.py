@@ -688,13 +688,15 @@ class TestPartitionExchange:
         create_partition_calls = [
             call
             for call in cursor.execute.call_args_list
-            if 'FOR VALUES FROM' in call.args[0]
+            if 'FOR VALUES FROM' in str(call.args[0])
         ]
 
         assert len(create_partition_calls) == 1
-        sql = create_partition_calls[0].args[0]
-        assert "FOR VALUES FROM ('2025-02-02'::DATE)" in sql
-        assert "TO ('2025-02-03'::DATE)" in sql
+        sql = str(create_partition_calls[0].args[0])
+        assert 'FOR VALUES FROM (' in sql
+        assert '2025-02-02' in sql
+        assert '2025-02-03' in sql
+        assert "SQL('DATE')" in sql
 
     def test_partition_exchange_uses_bounded_temp_table_name(self):
         op = GCSToPostgresOperator(
