@@ -400,7 +400,7 @@ class GCSToPostgresOperator(BaseOperator):
 
         file_format = self._detect_file_format(self.object_name)
         object_names = self._resolve_object_names(gcs_hook)
-        if self.batch_size and not self.partition_column:
+        if self.batch_size:
             return self._execute_batched(
                 context,
                 gcs_hook,
@@ -675,9 +675,14 @@ class GCSToPostgresOperator(BaseOperator):
             if self._skip_execution:
                 table_exists = True
             else:
-                self._create_table_from_dataframe(
-                    pg_hook, schema, table_name_simple, first_batch
-                )
+                if self.partition_column:
+                    self._create_partitioned_parent_table(
+                        pg_hook, schema, table_name_simple, first_batch
+                    )
+                else:
+                    self._create_table_from_dataframe(
+                        pg_hook, schema, table_name_simple, first_batch
+                    )
                 table_exists = True
 
         column_records = pg_hook.get_records(
@@ -702,6 +707,7 @@ class GCSToPostgresOperator(BaseOperator):
         validation_warnings = []
         upsert_temp_table = None
         source_order_column = '__airsql_source_order'
+        partition_temp_table = None
         try:
             if not self._skip_execution:
                 conn = pg_hook.get_conn()
@@ -740,6 +746,18 @@ class GCSToPostgresOperator(BaseOperator):
                             temp=temp_identifier,
                             order_col=sql_mod.Identifier(source_order_column),
                         )
+                    )
+                elif self.partition_column:
+                    partition_temp_table = self._build_partition_temp_table_name(
+                        table_name_simple, 'staging', 'staging'
+                    )
+                    temp_identifier = sql_mod.Identifier(partition_temp_table)
+                    target_identifier = sql_mod.Identifier(schema, table_name_simple)
+                    cursor.execute(
+                        sql_mod.SQL(
+                            'CREATE TEMP TABLE {temp} (LIKE {target} INCLUDING DEFAULTS '
+                            'INCLUDING CONSTRAINTS) ON COMMIT DROP'
+                        ).format(temp=temp_identifier, target=target_identifier)
                     )
                 elif self.replace:
                     table_identifier = sql_mod.Identifier(schema, table_name_simple)
@@ -789,7 +807,16 @@ class GCSToPostgresOperator(BaseOperator):
                     )
 
             if not self._skip_execution:
-                if self.conflict_columns:
+                if self.partition_column:
+                    self._partition_exchange_from_staging(
+                        cursor,
+                        sql_mod,
+                        schema,
+                        table_name_simple,
+                        partition_temp_table,
+                        common_columns,
+                    )
+                elif self.conflict_columns:
                     temp_identifier = sql_mod.Identifier(upsert_temp_table)
                     target_identifier = sql_mod.Identifier(schema, table_name_simple)
                     insert_columns = [
@@ -857,7 +884,11 @@ class GCSToPostgresOperator(BaseOperator):
             if conn is not None:
                 conn.close()
 
-        operation_type = 'replace' if self.replace else 'append'
+        operation_type = (
+            'partition_exchange'
+            if self.partition_column
+            else ('replace' if self.replace else ('upsert' if self.conflict_columns else 'append'))
+        )
         summary = OperationSummary(
             operation_type=operation_type,
             rows_extracted=total_rows,
@@ -1268,6 +1299,119 @@ class GCSToPostgresOperator(BaseOperator):
 
         if self.grant_table_privileges:
             self._grant_table_privileges(pg_hook, schema, table_name)
+
+    def _partition_exchange_from_staging(
+        self,
+        cursor,
+        sql_mod,
+        schema: str,
+        table_name: str,
+        staging_table: str,
+        columns: list[str],
+    ) -> None:
+        """Publish partition batches staged in one temporary table."""
+        if self.partition_column not in columns:
+            raise ValueError(
+                f"Partition column '{self.partition_column}' not found in data."
+            )
+
+        parent_identifier = sql_mod.Identifier(schema, table_name)
+        staging_identifier = sql_mod.Identifier(staging_table)
+        partition_identifier = sql_mod.Identifier(self.partition_column)
+        cursor.execute(
+            sql_mod.SQL(
+                'SELECT DISTINCT {partition} FROM {staging} '
+                'WHERE {partition} IS NOT NULL'
+            ).format(
+                partition=partition_identifier,
+                staging=staging_identifier,
+            )
+        )
+        partition_values = [row[0] for row in cursor.fetchall()]
+        if not partition_values:
+            raise ValueError(
+                f"No values found in partition column '{self.partition_column}'"
+            )
+
+        partition_pg_type = self._get_partition_pg_type()
+        insert_columns = sql_mod.SQL(', ').join(
+            sql_mod.Identifier(column) for column in columns
+        )
+
+        for partition_value in partition_values:
+            value_string = self._stringify_partition_bound(partition_value)
+            safe_value = value_string.replace('-', '').replace(' ', '_').replace(':', '')
+            partition_name = f'{table_name}_{safe_value}'
+            temp_name = self._build_partition_temp_table_name(
+                table_name, safe_value, value_string
+            )
+            temp_identifier = sql_mod.Identifier(temp_name)
+            partition_identifier = sql_mod.Identifier(partition_name)
+
+            cursor.execute(
+                sql_mod.SQL(
+                    'CREATE TEMP TABLE {temp} (LIKE {parent} INCLUDING DEFAULTS '
+                    'INCLUDING CONSTRAINTS) ON COMMIT DROP'
+                ).format(temp=temp_identifier, parent=parent_identifier)
+            )
+            cursor.execute(
+                sql_mod.SQL(
+                    'INSERT INTO {temp} ({columns}) SELECT {columns} FROM {staging} '
+                    'WHERE {partition} = %s'
+                ).format(
+                    temp=temp_identifier,
+                    columns=insert_columns,
+                    staging=staging_identifier,
+                    partition=sql_mod.Identifier(self.partition_column),
+                ),
+                (partition_value,),
+            )
+
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = %s AND n.nspname = %s
+                )
+                """,
+                (partition_name, schema or 'public'),
+            )
+            if cursor.fetchone()[0]:
+                cursor.execute(
+                    sql_mod.SQL('ALTER TABLE {parent} DETACH PARTITION {partition}').format(
+                        parent=parent_identifier,
+                        partition=partition_identifier,
+                    )
+                )
+                cursor.execute(
+                    sql_mod.SQL('DROP TABLE IF EXISTS {partition}').format(
+                        partition=partition_identifier
+                    )
+                )
+
+            partition_start = self._quote_sql_literal(value_string)
+            partition_end = self._quote_sql_literal(
+                self._get_next_partition_value(partition_value)
+            )
+            cursor.execute(
+                sql_mod.SQL(
+                    'CREATE TABLE {partition} PARTITION OF {parent} '
+                    'FOR VALUES FROM ({start}::{type}) TO ({end}::{type})'
+                ).format(
+                    partition=partition_identifier,
+                    parent=parent_identifier,
+                    start=sql_mod.SQL(partition_start),
+                    end=sql_mod.SQL(partition_end),
+                    type=sql_mod.SQL(partition_pg_type),
+                )
+            )
+            cursor.execute(
+                sql_mod.SQL('INSERT INTO {partition} SELECT * FROM {temp}').format(
+                    partition=partition_identifier,
+                    temp=temp_identifier,
+                )
+            )
 
     def _partition_exchange(self, pg_hook, schema: str, table_name: str, df) -> None:
         """Perform partition exchange for incremental data loads.
