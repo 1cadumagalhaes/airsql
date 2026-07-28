@@ -773,6 +773,14 @@ class GCSToPostgresOperator(BaseOperator):
             for batch in chain((first_batch,), batches):
                 if batch.empty:
                     continue
+                missing_columns = [
+                    column for column in common_columns if column not in batch.columns
+                ]
+                if missing_columns:
+                    raise ValueError(
+                        'Source schema changed between batches. Columns missing '
+                        f'from a later batch: {missing_columns}'
+                    )
                 late_columns = [
                     column
                     for column in batch.columns
