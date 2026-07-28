@@ -1398,3 +1398,57 @@ class TestRoundTrip:
                 conn.execute(text('DROP TABLE IF EXISTS source_json'))
                 conn.execute(text('DROP TABLE IF EXISTS dest_json'))
                 conn.commit()
+
+
+class TestBatchPartitionExchange:
+    def test_partition_exchange_stages_multiple_batches(self, pg_engine, real_postgres_hook):
+        from unittest.mock import MagicMock, patch
+
+        from airsql.transfers.gcs_postgres import GCSToPostgresOperator
+
+        csv_data = b'''partition_date,name
+2024-01-01,Alice
+2024-01-01,Bob
+2024-01-02,Carol
+'''
+        op = GCSToPostgresOperator(
+            task_id='test_partition_batch',
+            target_table_name='partitioned_import',
+            bucket_name='test-bucket',
+            object_name='data.csv',
+            postgres_conn_id='postgres_default',
+            gcp_conn_id='NOT_USED',
+            create_if_missing=True,
+            partition_column='partition_date',
+            source_schema={'partition_date': 'DATE'},
+            batch_size=2,
+        )
+        mock_gcs = MagicMock()
+        mock_gcs.download.return_value = csv_data
+
+        with (
+            patch('airsql.transfers.gcs_postgres.GCSHook', return_value=mock_gcs),
+            patch(
+                'airsql.transfers.gcs_postgres.PostgresHook',
+                return_value=real_postgres_hook('postgres_default'),
+            ),
+        ):
+            op.execute({})
+
+        try:
+            with pg_engine.connect() as conn:
+                result = conn.execute(
+                    text(
+                        'SELECT partition_date, name FROM partitioned_import '
+                        'ORDER BY partition_date, name'
+                    )
+                ).fetchall()
+            assert [(str(row[0]), row[1]) for row in result] == [
+                ('2024-01-01', 'Alice'),
+                ('2024-01-01', 'Bob'),
+                ('2024-01-02', 'Carol'),
+            ]
+        finally:
+            with pg_engine.connect() as conn:
+                conn.execute(text('DROP TABLE IF EXISTS partitioned_import CASCADE'))
+                conn.commit()

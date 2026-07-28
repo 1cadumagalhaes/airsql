@@ -795,14 +795,26 @@ class GCSToPostgresOperator(BaseOperator):
                         cursor,
                         conn,
                         sql_mod,
-                        None if self.conflict_columns else schema,
-                        upsert_temp_table if self.conflict_columns else table_name_simple,
+                        None if (self.conflict_columns or self.partition_column) else schema,
+                        (
+                            upsert_temp_table
+                            if self.conflict_columns
+                            else (
+                                partition_temp_table
+                                if self.partition_column
+                                else table_name_simple
+                            )
+                        ),
                         filtered,
                         [sql_mod.Identifier(col) for col in filtered.columns]
-                        if self.conflict_columns
+                        if (self.conflict_columns or self.partition_column)
                         else None,
-                        sql_mod.Identifier(upsert_temp_table)
-                        if self.conflict_columns
+                        sql_mod.Identifier(
+                            upsert_temp_table
+                            if self.conflict_columns
+                            else partition_temp_table
+                        )
+                        if (self.conflict_columns or self.partition_column)
                         else None,
                     )
 
