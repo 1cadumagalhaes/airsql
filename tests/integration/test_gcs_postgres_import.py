@@ -1454,3 +1454,54 @@ class TestBatchPartitionExchange:
             with pg_engine.connect() as conn:
                 conn.execute(text('DROP TABLE IF EXISTS partitioned_import CASCADE'))
                 conn.commit()
+
+
+class TestBatchSchemaValidation:
+    def test_rejects_columns_missing_from_later_batch(self, pg_engine, real_postgres_hook):
+        from unittest.mock import MagicMock, patch
+
+        from airsql.transfers.gcs_postgres import GCSToPostgresOperator
+
+        with pg_engine.connect() as conn:
+            conn.execute(text('DROP TABLE IF EXISTS batch_schema_test'))
+            conn.execute(text('CREATE TABLE batch_schema_test (id INTEGER, name TEXT)'))
+            conn.commit()
+
+        payloads = {
+            'data-1.csv': b'id,name\n1,Alice\n',
+            'data-2.csv': b'id\n2\n',
+        }
+        mock_gcs = MagicMock()
+        mock_gcs.list.return_value = list(payloads)
+
+        def download(bucket_name, object_name, filename):
+            with open(filename, 'wb') as file_obj:
+                file_obj.write(payloads[object_name])
+
+        mock_gcs.download.side_effect = download
+
+        operator = GCSToPostgresOperator(
+            task_id='batch_schema_test',
+            target_table_name='batch_schema_test',
+            bucket_name='test-bucket',
+            object_name='data-*.csv',
+            postgres_conn_id='postgres_default',
+            gcp_conn_id='NOT_USED',
+            replace=True,
+            batch_size=1,
+        )
+
+        try:
+            with (
+                patch('airsql.transfers.gcs_postgres.GCSHook', return_value=mock_gcs),
+                patch(
+                    'airsql.transfers.gcs_postgres.PostgresHook',
+                    return_value=real_postgres_hook('postgres_default'),
+                ),
+            ):
+                with pytest.raises(ValueError, match='missing from a later batch'):
+                    operator.execute({})
+        finally:
+            with pg_engine.connect() as conn:
+                conn.execute(text('DROP TABLE IF EXISTS batch_schema_test'))
+                conn.commit()
