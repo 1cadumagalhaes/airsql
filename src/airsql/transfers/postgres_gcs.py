@@ -1165,17 +1165,20 @@ class PostgresToGCSOperator(BaseOperator):
             )
             # If we streamed into a temp file, upload from file to avoid huge memory usage
             if tmp_path:
-                gcs_hook.upload(
-                    bucket_name=self.bucket,
-                    object_name=self.filename,
-                    filename=tmp_path,
-                    mime_type=mime_type,
-                )
-                # Cleanup tmp file
                 try:
-                    os.remove(tmp_path)
-                except Exception:
-                    self.log.debug('Failed to remove temporary file: %s', tmp_path)
+                    gcs_hook.upload(
+                        bucket_name=self.bucket,
+                        object_name=self.filename,
+                        filename=tmp_path,
+                        mime_type=mime_type,
+                    )
+                finally:
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        self.log.debug(
+                            'Failed to remove temporary file: %s', tmp_path
+                        )
             else:
                 gcs_hook.upload(
                     bucket_name=self.bucket,
