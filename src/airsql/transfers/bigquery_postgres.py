@@ -120,6 +120,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         emit_asset: bool = True,
         cleanup_temp_files: bool = True,
         dry_run: bool = False,
+        batch_size: Optional[int] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -177,6 +178,7 @@ class BigQueryToPostgresOperator(BaseOperator):
         self.emit_asset = emit_asset
         self.cleanup_temp_files = cleanup_temp_files
         self._skip_execution = dry_run
+        self.batch_size = batch_size
 
         if self.emit_asset:
             self.outlets = [Asset(f'airsql://database/{self.destination_table}')]
@@ -267,6 +269,7 @@ class BigQueryToPostgresOperator(BaseOperator):
             source_schema=bq_schema,
             postgres_type_overrides=self.postgres_type_overrides,
             dry_run=self._skip_execution,
+            batch_size=self.batch_size,
         )
         gcs_to_pg.execute(context)
 
