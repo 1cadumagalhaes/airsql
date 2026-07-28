@@ -843,7 +843,10 @@ class TestBoundedGCSLoading:
 
         class FakeGCSHook:
             def download(self, bucket_name, object_name, filename):
-                with open(source, 'rb') as input_file, open(filename, 'wb') as output_file:
+                with (
+                    open(source, 'rb') as input_file,
+                    open(filename, 'wb') as output_file,
+                ):
                     output_file.write(input_file.read())
 
         operator = GCSToPostgresOperator(
@@ -882,6 +885,7 @@ class TestBoundedGCSLoading:
             gcp_conn_id='gcp',
         )
 
-        assert operator._get_total_file_size_mb(
-            FakeGCSHook(), ['one.csv', 'two.csv']
-        ) == 0.0029296875
+        assert (
+            operator._get_total_file_size_mb(FakeGCSHook(), ['one.csv', 'two.csv'])
+            == 0.0029296875
+        )

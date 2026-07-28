@@ -694,7 +694,9 @@ class GCSToPostgresOperator(BaseOperator):
             parameters=(schema, table_name_simple),
         )
         if not column_records:
-            raise ValueError(f'Could not retrieve column information for {table_name_full}.')
+            raise ValueError(
+                f'Could not retrieve column information for {table_name_full}.'
+            )
         model_columns = [record[0] for record in column_records]
         column_types = {record[0]: record[1] for record in column_records}
         common_columns = [col for col in first_batch.columns if col in model_columns]
@@ -762,14 +764,25 @@ class GCSToPostgresOperator(BaseOperator):
                 elif self.replace:
                     table_identifier = sql_mod.Identifier(schema, table_name_simple)
                     cursor.execute(
-                        sql_mod.SQL('TRUNCATE TABLE {table}').format(
-                            table=table_identifier
-                        ).as_string(cursor)
+                        sql_mod
+                        .SQL('TRUNCATE TABLE {table}')
+                        .format(table=table_identifier)
+                        .as_string(cursor)
                     )
 
             for batch in chain((first_batch,), batches):
                 if batch.empty:
                     continue
+                late_columns = [
+                    column
+                    for column in batch.columns
+                    if column in model_columns and column not in common_columns
+                ]
+                if late_columns:
+                    raise ValueError(
+                        'Source schema changed between batches. Columns found only '
+                        f'in a later batch: {late_columns}'
+                    )
                 filtered = batch[common_columns].where(
                     pd.notna(batch[common_columns]), None
                 )
@@ -795,7 +808,9 @@ class GCSToPostgresOperator(BaseOperator):
                         cursor,
                         conn,
                         sql_mod,
-                        None if (self.conflict_columns or self.partition_column) else schema,
+                        None
+                        if (self.conflict_columns or self.partition_column)
+                        else schema,
                         (
                             upsert_temp_table
                             if self.conflict_columns
@@ -842,10 +857,17 @@ class GCSToPostgresOperator(BaseOperator):
                         for col in insert_columns
                         if col not in self.conflict_columns
                         and col.lower()
-                        not in {'criado_em', 'atualizado_em', 'created_at', 'updated_at'}
+                        not in {
+                            'criado_em',
+                            'atualizado_em',
+                            'created_at',
+                            'updated_at',
+                        }
                     ]
                     if update_columns:
-                        update_sql = sql_mod.SQL('UPDATE SET {sets} WHERE ({target}) IS DISTINCT FROM ({excluded})').format(
+                        update_sql = sql_mod.SQL(
+                            'UPDATE SET {sets} WHERE ({target}) IS DISTINCT FROM ({excluded})'
+                        ).format(
                             sets=sql_mod.SQL(', ').join(
                                 sql_mod.SQL('{col} = EXCLUDED.{col}').format(
                                     col=sql_mod.Identifier(col)
@@ -899,7 +921,11 @@ class GCSToPostgresOperator(BaseOperator):
         operation_type = (
             'partition_exchange'
             if self.partition_column
-            else ('replace' if self.replace else ('upsert' if self.conflict_columns else 'append'))
+            else (
+                'replace'
+                if self.replace
+                else ('upsert' if self.conflict_columns else 'append')
+            )
         )
         summary = OperationSummary(
             operation_type=operation_type,
@@ -1352,7 +1378,9 @@ class GCSToPostgresOperator(BaseOperator):
 
         for partition_value in partition_values:
             value_string = self._stringify_partition_bound(partition_value)
-            safe_value = value_string.replace('-', '').replace(' ', '_').replace(':', '')
+            safe_value = (
+                value_string.replace('-', '').replace(' ', '_').replace(':', '')
+            )
             partition_name = f'{table_name}_{safe_value}'
             temp_name = self._build_partition_temp_table_name(
                 table_name, safe_value, value_string
@@ -1391,7 +1419,9 @@ class GCSToPostgresOperator(BaseOperator):
             )
             if cursor.fetchone()[0]:
                 cursor.execute(
-                    sql_mod.SQL('ALTER TABLE {parent} DETACH PARTITION {partition}').format(
+                    sql_mod.SQL(
+                        'ALTER TABLE {parent} DETACH PARTITION {partition}'
+                    ).format(
                         parent=parent_identifier,
                         partition=partition_identifier,
                     )
