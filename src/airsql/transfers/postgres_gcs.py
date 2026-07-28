@@ -310,7 +310,7 @@ class PostgresToGCSOperator(BaseOperator):
         export_format: str = PostgresExportFormat.CSV,
         schema_filename: Optional[str] = None,
         schema_overrides: Optional[Dict[str, str]] = None,
-        pandas_chunksize: Optional[int] = None,
+        pandas_chunksize: Optional[int] = 100000,
         use_copy: bool = False,
         use_temp_file: bool = False,
         csv_kwargs: Optional[dict] = None,
