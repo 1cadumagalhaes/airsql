@@ -834,3 +834,54 @@ class TestGCSObjectResolution:
             'temp/export/data-000000000000.parquet',
             'temp/export/data-000000000001.parquet',
         ]
+
+
+class TestBoundedGCSLoading:
+    def test_csv_reader_yields_configured_batches(self, tmp_path):
+        source = tmp_path / 'source.csv'
+        source.write_text('id,name\n1,one\n2,two\n3,three\n', encoding='utf-8')
+
+        class FakeGCSHook:
+            def download(self, bucket_name, object_name, filename):
+                with open(source, 'rb') as input_file, open(filename, 'wb') as output_file:
+                    output_file.write(input_file.read())
+
+        operator = GCSToPostgresOperator(
+            task_id='test_task',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='source.csv',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+            batch_size=2,
+        )
+
+        batches = list(
+            operator._iter_dataframes_from_gcs_objects(
+                FakeGCSHook(), ['source.csv'], 'csv'
+            )
+        )
+
+        assert [len(batch) for batch in batches] == [2, 1]
+        assert batches[0]['id'].tolist() == [1, 2]
+
+    def test_file_size_uses_gcs_metadata(self):
+        class FakeGCSHook:
+            def get_size(self, bucket_name, object_name):
+                return {'one.csv': 1024, 'two.csv': 2048}[object_name]
+
+            def download(self, **kwargs):
+                raise AssertionError('file size must not download objects')
+
+        operator = GCSToPostgresOperator(
+            task_id='test_task',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='*.csv',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+        )
+
+        assert operator._get_total_file_size_mb(
+            FakeGCSHook(), ['one.csv', 'two.csv']
+        ) == 0.0029296875
