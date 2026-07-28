@@ -310,7 +310,7 @@ class PostgresToGCSOperator(BaseOperator):
         export_format: str = PostgresExportFormat.CSV,
         schema_filename: Optional[str] = None,
         schema_overrides: Optional[Dict[str, str]] = None,
-        pandas_chunksize: Optional[int] = 100000,
+        pandas_chunksize: Optional[int] = None,
         use_copy: bool = False,
         use_temp_file: bool = False,
         csv_kwargs: Optional[dict] = None,
@@ -933,6 +933,26 @@ class PostgresToGCSOperator(BaseOperator):
                     )
                     if schema_source_df is None:
                         schema_source_df = fixed_chunk
+
+                    if export_format == 'jsonl' and json_columns:
+                        import ast
+
+                        def parse_json_value(value):
+                            if not isinstance(value, str) or not value:
+                                return value
+                            try:
+                                return json.loads(value)
+                            except json.JSONDecodeError:
+                                try:
+                                    return ast.literal_eval(value)
+                                except (ValueError, SyntaxError):
+                                    return value
+
+                        for col in json_columns:
+                            if col in fixed_chunk.columns:
+                                fixed_chunk[col] = fixed_chunk[col].apply(
+                                    parse_json_value
+                                )
 
                     if export_format == 'csv':
                         csv_kwargs = {'index': False, **self.csv_kwargs}

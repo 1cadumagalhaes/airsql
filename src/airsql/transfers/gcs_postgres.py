@@ -588,11 +588,14 @@ class GCSToPostgresOperator(BaseOperator):
         for object_name in object_names:
             suffix = f'.{file_format}'
             with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
-                gcs_hook.download(
+                downloaded = gcs_hook.download(
                     bucket_name=self.bucket_name,
                     object_name=object_name,
                     filename=tmp.name,
                 )
+                if isinstance(downloaded, bytes):
+                    tmp.write(downloaded)
+                    tmp.flush()
                 if file_format == 'parquet':
                     import pyarrow.parquet as pq  # noqa: PLC0415
 
@@ -1037,12 +1040,13 @@ class GCSToPostgresOperator(BaseOperator):
         return pd.read_csv(StringIO(file_data.decode('utf-8')), dtype_backend='pyarrow')
 
     def _get_total_file_size_mb(self, gcs_hook, object_names: list[str]) -> float:
-        total_size_bytes = sum(
-            gcs_hook.get_size(
+        total_size_bytes = 0
+        for object_name in object_names:
+            object_size = gcs_hook.get_size(
                 bucket_name=self.bucket_name, object_name=object_name
             )
-            for object_name in object_names
-        )
+            if isinstance(object_size, (int, float)):
+                total_size_bytes += object_size
         return total_size_bytes / (1024 * 1024)
 
     @staticmethod

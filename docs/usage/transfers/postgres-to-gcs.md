@@ -28,7 +28,7 @@ export = PostgresToGCSOperator(
 | `gcp_conn_id` | `str` | No | GCP connection ID |
 | `export_format` | `str` | No | csv, jsonl, parquet (default: csv) |
 | `schema_filename` | `str` | No | Path for BigQuery schema JSON |
-| `pandas_chunksize` | `int` | No | Rows per chunk for large exports (default: 100000) |
+| `pandas_chunksize` | `int` | No | Rows per chunk for large exports; omitted preserves the existing full-query path |
 | `use_copy` | `bool` | No | Use PostgreSQL COPY for streaming |
 | `use_temp_file` | `bool` | No | Use temp file instead of streaming |
 | `csv_kwargs` | `dict` | No | Additional pandas CSV options |
