@@ -2,6 +2,7 @@
 Operator to transfer data from PostgreSQL to Google Cloud Storage.
 """
 
+import fnmatch
 import json
 import os
 import tempfile
@@ -928,15 +929,39 @@ class PostgresToGCSOperator(BaseOperator):
                 else None
             )
             filename_root, filename_extension = os.path.splitext(self.filename)
+            shard_pattern = f'{filename_root}-*{filename_extension}'
+            uploaded_shard_names = []
+
+            def delete_shards(shard_names):
+                for shard_name in shard_names:
+                    try:
+                        gcs_hook.delete(
+                            bucket_name=self.bucket,
+                            object_name=shard_name,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        self.log.warning(
+                            'Failed to clean up GCS shard %s: %s', shard_name, exc
+                        )
+
+            if shard_size_bytes is not None and not self._skip_execution:
+                prefix = f'{filename_root}-'
+                existing_shards = [
+                    name
+                    for name in gcs_hook.list(
+                        bucket_name=self.bucket,
+                        prefix=prefix,
+                    )
+                    if fnmatch.fnmatch(name, shard_pattern)
+                ]
+                delete_shards(existing_shards)
 
             def upload_completed_shard():
                 nonlocal shard_number, tmp_path, parquet_writer, uploaded_bytes
                 if parquet_writer:
                     parquet_writer.close()
                     parquet_writer = None
-                shard_name = (
-                    f'{filename_root}-{shard_number:05d}{filename_extension}'
-                )
+                shard_name = f'{filename_root}-{shard_number:05d}{filename_extension}'
                 shard_bytes = os.path.getsize(tmp_path)
                 if not self._skip_execution:
                     gcs_hook.upload(
@@ -946,12 +971,14 @@ class PostgresToGCSOperator(BaseOperator):
                         mime_type=mime_type,
                     )
                     uploaded_shards.append(shard_name)
+                    uploaded_shard_names.append(shard_name)
                 uploaded_bytes += shard_bytes
                 os.remove(tmp_path)
                 shard_number += 1
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
                 tmp_path = tmp.name
                 tmp.close()
+
             try:
                 if export_format == 'parquet':
                     import pyarrow.parquet as pq  # noqa: PLC0415
@@ -1044,6 +1071,8 @@ class PostgresToGCSOperator(BaseOperator):
                         self.log.debug(
                             'Failed to remove tmp file %s: %s', tmp_path, exc
                         )
+                if uploaded_shard_names:
+                    delete_shards(uploaded_shard_names)
                 self.log.error(f'Failed during streaming export: {e}')
                 raise
 
@@ -1065,9 +1094,7 @@ class PostgresToGCSOperator(BaseOperator):
             )
             if uploaded_shards:
                 self.filename = f'{filename_root}-*{filename_extension}'
-            file_size_mb = (
-                uploaded_bytes + os.path.getsize(tmp_path)
-            ) / (1024 * 1024)
+            file_size_mb = (uploaded_bytes + os.path.getsize(tmp_path)) / (1024 * 1024)
             validation_result = ValidationResult(is_valid=True)
         else:
             df = pd.read_sql(final_query, engine, dtype_backend='pyarrow')
@@ -1238,14 +1265,21 @@ class PostgresToGCSOperator(BaseOperator):
             # If we streamed into a temp file, upload from file to avoid huge memory usage
             if tmp_path:
                 if uploaded_shards:
-                    shard_name = f'{filename_root}-{shard_number:05d}{filename_extension}'
-                    gcs_hook.upload(
-                        bucket_name=self.bucket,
-                        object_name=shard_name,
-                        filename=tmp_path,
-                        mime_type=mime_type,
+                    shard_name = (
+                        f'{filename_root}-{shard_number:05d}{filename_extension}'
                     )
-                    uploaded_shards.append(shard_name)
+                    try:
+                        gcs_hook.upload(
+                            bucket_name=self.bucket,
+                            object_name=shard_name,
+                            filename=tmp_path,
+                            mime_type=mime_type,
+                        )
+                        uploaded_shards.append(shard_name)
+                        uploaded_shard_names.append(shard_name)
+                    except Exception:
+                        delete_shards(uploaded_shard_names)
+                        raise
                 else:
                     try:
                         gcs_hook.upload(
@@ -1265,9 +1299,7 @@ class PostgresToGCSOperator(BaseOperator):
                     try:
                         os.remove(tmp_path)
                     except Exception:
-                        self.log.debug(
-                            'Failed to remove temporary file: %s', tmp_path
-                        )
+                        self.log.debug('Failed to remove temporary file: %s', tmp_path)
             else:
                 gcs_hook.upload(
                     bucket_name=self.bucket,
