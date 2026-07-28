@@ -400,7 +400,7 @@ class GCSToPostgresOperator(BaseOperator):
 
         file_format = self._detect_file_format(self.object_name)
         object_names = self._resolve_object_names(gcs_hook)
-        if self.batch_size and not self.conflict_columns and not self.partition_column:
+        if self.batch_size and not self.partition_column:
             return self._execute_batched(
                 context,
                 gcs_hook,
@@ -700,12 +700,48 @@ class GCSToPostgresOperator(BaseOperator):
         total_rows = 0
         validation_errors = []
         validation_warnings = []
+        upsert_temp_table = None
+        source_order_column = '__airsql_source_order'
         try:
             if not self._skip_execution:
                 conn = pg_hook.get_conn()
                 cursor = conn.cursor()
                 sql_mod = _get_sql_module(conn)
-                if self.replace:
+                if self.conflict_columns:
+                    if source_order_column in model_columns:
+                        raise ValueError(
+                            f'Target table cannot contain reserved column {source_order_column}'
+                        )
+                    missing_conflict_columns = [
+                        col
+                        for col in self.conflict_columns
+                        if col not in common_columns
+                    ]
+                    if missing_conflict_columns:
+                        raise ValueError(
+                            'Conflict columns not found in source data: '
+                            f'{missing_conflict_columns}'
+                        )
+                    upsert_temp_table = self._build_upsert_temp_table_name(
+                        table_name_simple
+                    )
+                    temp_identifier = sql_mod.Identifier(upsert_temp_table)
+                    target_identifier = sql_mod.Identifier(schema, table_name_simple)
+                    cursor.execute(
+                        sql_mod.SQL(
+                            'CREATE TEMP TABLE {temp} (LIKE {target} INCLUDING DEFAULTS) '
+                            'ON COMMIT DROP'
+                        ).format(temp=temp_identifier, target=target_identifier)
+                    )
+                    cursor.execute(
+                        sql_mod.SQL(
+                            'ALTER TABLE {temp} ADD COLUMN {order_col} BIGINT'
+                        ).format(
+                            temp=temp_identifier,
+                            order_col=sql_mod.Identifier(source_order_column),
+                        )
+                    )
+                elif self.replace:
                     table_identifier = sql_mod.Identifier(schema, table_name_simple)
                     cursor.execute(
                         sql_mod.SQL('TRUNCATE TABLE {table}').format(
@@ -730,16 +766,86 @@ class GCSToPostgresOperator(BaseOperator):
                 total_rows += len(filtered)
                 if not self._skip_execution:
                     filtered = self._convert_json_columns_to_strings(filtered)
+                    insert_columns = list(filtered.columns)
+                    if self.conflict_columns:
+                        filtered[source_order_column] = range(
+                            total_rows - len(filtered), total_rows
+                        )
+                        insert_columns.append(source_order_column)
+                        filtered = filtered[insert_columns]
                     self._insert_dataframe_rows(
                         cursor,
                         conn,
                         sql_mod,
-                        schema,
-                        table_name_simple,
+                        None if self.conflict_columns else schema,
+                        upsert_temp_table if self.conflict_columns else table_name_simple,
                         filtered,
+                        [sql_mod.Identifier(col) for col in filtered.columns]
+                        if self.conflict_columns
+                        else None,
+                        sql_mod.Identifier(upsert_temp_table)
+                        if self.conflict_columns
+                        else None,
                     )
 
             if not self._skip_execution:
+                if self.conflict_columns:
+                    temp_identifier = sql_mod.Identifier(upsert_temp_table)
+                    target_identifier = sql_mod.Identifier(schema, table_name_simple)
+                    insert_columns = [
+                        col for col in model_columns if col in common_columns
+                    ]
+                    conflict_identifiers = [
+                        sql_mod.Identifier(col) for col in self.conflict_columns
+                    ]
+                    update_columns = [
+                        col
+                        for col in insert_columns
+                        if col not in self.conflict_columns
+                        and col.lower()
+                        not in {'criado_em', 'atualizado_em', 'created_at', 'updated_at'}
+                    ]
+                    if update_columns:
+                        update_sql = sql_mod.SQL('UPDATE SET {sets} WHERE ({target}) IS DISTINCT FROM ({excluded})').format(
+                            sets=sql_mod.SQL(', ').join(
+                                sql_mod.SQL('{col} = EXCLUDED.{col}').format(
+                                    col=sql_mod.Identifier(col)
+                                )
+                                for col in update_columns
+                            ),
+                            target=sql_mod.SQL(', ').join(
+                                sql_mod.SQL('target.{col}').format(
+                                    col=sql_mod.Identifier(col)
+                                )
+                                for col in update_columns
+                            ),
+                            excluded=sql_mod.SQL(', ').join(
+                                sql_mod.SQL('EXCLUDED.{col}').format(
+                                    col=sql_mod.Identifier(col)
+                                )
+                                for col in update_columns
+                            ),
+                        )
+                    else:
+                        update_sql = sql_mod.SQL('NOTHING')
+                    cursor.execute(
+                        sql_mod.SQL(
+                            'INSERT INTO {target} AS target ({columns}) '
+                            'SELECT {columns} FROM (SELECT DISTINCT ON ({conflicts}) '
+                            '{columns}, {order_col} FROM {temp} '
+                            'ORDER BY {conflicts}, {order_col} DESC) AS source '
+                            'ON CONFLICT ({conflicts}) DO {update}'
+                        ).format(
+                            target=target_identifier,
+                            columns=sql_mod.SQL(', ').join(
+                                sql_mod.Identifier(col) for col in insert_columns
+                            ),
+                            conflicts=sql_mod.SQL(', ').join(conflict_identifiers),
+                            order_col=sql_mod.Identifier(source_order_column),
+                            temp=temp_identifier,
+                            update=update_sql,
+                        )
+                    )
                 conn.commit()
         except Exception:
             if conn is not None:
