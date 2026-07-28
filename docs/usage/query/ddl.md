@@ -7,12 +7,14 @@ The `@sql.ddl` decorator executes DDL (Data Definition Language) statements like
 ```python
 from airsql import sql
 
-@sql.ddl(source_conn="postgres_conn")
+
+@sql.ddl(source_conn='postgres_conn')
 def create_view():
     return """
     CREATE OR REPLACE VIEW active_users AS
     SELECT * FROM users WHERE active = true
     """
+
 
 ddl_task = create_view()
 ```
@@ -31,7 +33,7 @@ ddl_task = create_view()
 ### Create View
 
 ```python
-@sql.ddl(source_conn="postgres_conn")
+@sql.ddl(source_conn='postgres_conn')
 def create_user_summary_view():
     return """
     CREATE OR REPLACE VIEW v_user_summary AS
@@ -49,7 +51,7 @@ def create_user_summary_view():
 ### Create Table
 
 ```python
-@sql.ddl(source_conn="postgres_conn")
+@sql.ddl(source_conn='postgres_conn')
 def create_partitioned_table():
     return """
     CREATE TABLE IF NOT EXISTS events (
@@ -64,7 +66,7 @@ def create_partitioned_table():
 ### Create Index
 
 ```python
-@sql.ddl(source_conn="postgres_conn")
+@sql.ddl(source_conn='postgres_conn')
 def create_index():
     return """
     CREATE INDEX IF NOT EXISTS idx_orders_user_date 
@@ -75,15 +77,15 @@ def create_index():
 ### Drop Table
 
 ```python
-@sql.ddl(source_conn="postgres_conn")
+@sql.ddl(source_conn='postgres_conn')
 def drop_temp_table():
-    return "DROP TABLE IF EXISTS temp_staging"
+    return 'DROP TABLE IF EXISTS temp_staging'
 ```
 
 ### Alter Table
 
 ```python
-@sql.ddl(source_conn="postgres_conn")
+@sql.ddl(source_conn='postgres_conn')
 def add_column():
     return """
     ALTER TABLE users 
@@ -96,25 +98,22 @@ def add_column():
 ```python
 from airsql import sql, Table
 
-@sql.ddl(source_conn="postgres_conn")
+
+@sql.ddl(source_conn='postgres_conn')
 def create_view_from_table(source_table):
     return f"""
     CREATE OR REPLACE VIEW active_users AS
     SELECT * FROM {{ source_table }} WHERE active = true
     """
 
-task = create_view_from_table(
-    source_table=Table("postgres_conn", "public.users")
-)
+
+task = create_view_from_table(source_table=Table('postgres_conn', 'public.users'))
 ```
 
 ### With Template Variables
 
 ```python
-@sql.ddl(
-    source_conn="bigquery_conn",
-    dataset="analytics"
-)
+@sql.ddl(source_conn='bigquery_conn', dataset='analytics')
 def create_partitioned_view():
     return """
     CREATE OR REPLACE VIEW {{ dataset }}.daily_events AS
@@ -126,10 +125,7 @@ def create_partitioned_view():
 ### Using SQL Files
 
 ```python
-@sql.ddl(
-    source_conn="postgres_conn",
-    sql_file="ddl/create_schema.sql"
-)
+@sql.ddl(source_conn='postgres_conn', sql_file='ddl/create_schema.sql')
 def create_schema():
     pass
 ```
@@ -137,7 +133,7 @@ def create_schema():
 ### BigQuery DDL
 
 ```python
-@sql.ddl(source_conn="bigquery_conn")
+@sql.ddl(source_conn='bigquery_conn')
 def create_bigquery_table():
     return """
     CREATE TABLE IF NOT EXISTS `project.dataset.events` (
@@ -156,8 +152,8 @@ Optionally track outputs for data lineage:
 
 ```python
 @sql.ddl(
-    source_conn="postgres_conn",
-    output_table=Table("postgres_conn", "views.active_users")
+    source_conn='postgres_conn',
+    output_table=Table('postgres_conn', 'views.active_users'),
 )
 def create_tracked_view():
     return """
@@ -171,7 +167,8 @@ def create_tracked_view():
 ```python
 from datetime import datetime
 
-@sql.ddl(source_conn="postgres_conn")
+
+@sql.ddl(source_conn='postgres_conn')
 def create_partition(date_value):
     return f"""
     CREATE TABLE IF NOT EXISTS events_{date_value.replace('-', '_')}
@@ -179,7 +176,8 @@ def create_partition(date_value):
     FOR VALUES FROM ('{date_value}') TO ('{date_value}'::date + INTERVAL '1 day')
     """
 
-task = create_partition(date_value="{{ ds }}")
+
+task = create_partition(date_value='{{ ds }}')
 ```
 
 ## Important Notes

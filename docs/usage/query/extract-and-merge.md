@@ -7,10 +7,11 @@ The `@sql.extract_and_merge` decorator combines SQL extraction and DataFrame mer
 ```python
 from airsql import sql, Table
 
+
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"],
-    source_conn="bigquery_conn"
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['id'],
+    source_conn='bigquery_conn',
 )
 def sync_users():
     return """
@@ -18,6 +19,7 @@ def sync_users():
     FROM staging_users
     WHERE processed = true
     """
+
 
 merge_task = sync_users()
 ```
@@ -42,9 +44,9 @@ merge_task = sync_users()
 
 ```python
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "inventory.products"),
-    conflict_columns=["sku"],
-    source_conn="bigquery_conn"
+    output_table=Table('postgres_conn', 'inventory.products'),
+    conflict_columns=['sku'],
+    source_conn='bigquery_conn',
 )
 def sync_products():
     return """
@@ -58,10 +60,10 @@ def sync_products():
 
 ```python
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "analytics.daily_metrics"),
-    conflict_columns=["metric_date", "metric_name"],
-    update_columns=["metric_value"],
-    source_conn="bigquery_conn"
+    output_table=Table('postgres_conn', 'analytics.daily_metrics'),
+    conflict_columns=['metric_date', 'metric_name'],
+    update_columns=['metric_value'],
+    source_conn='bigquery_conn',
 )
 def update_daily_metrics():
     return """
@@ -80,10 +82,10 @@ Only update specific columns on conflict:
 
 ```python
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["user_id", "event_date"],
-    update_columns=["event_count", "last_updated"],
-    source_conn="bigquery_conn"
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['user_id', 'event_date'],
+    update_columns=['event_count', 'last_updated'],
+    source_conn='bigquery_conn',
 )
 def merge_user_events():
     return """
@@ -102,10 +104,10 @@ def merge_user_events():
 
 ```python
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "reporting.current_state"),
-    conflict_columns=["entity_id"],
-    source_conn="bigquery_conn",
-    pre_truncate=True
+    output_table=Table('postgres_conn', 'reporting.current_state'),
+    conflict_columns=['entity_id'],
+    source_conn='bigquery_conn',
+    pre_truncate=True,
 )
 def rebuild_current_state():
     return """
@@ -119,10 +121,10 @@ def rebuild_current_state():
 
 ```python
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "audit.change_log"),
-    conflict_columns=["change_id"],
-    timestamp_column="loaded_at",
-    source_conn="bigquery_conn"
+    output_table=Table('postgres_conn', 'audit.change_log'),
+    conflict_columns=['change_id'],
+    timestamp_column='loaded_at',
+    source_conn='bigquery_conn',
 )
 def sync_changes():
     return """
@@ -136,10 +138,10 @@ def sync_changes():
 
 ```python
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"],
-    sql_file="sql/user_merge.sql",
-    source_conn="bigquery_conn"
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['id'],
+    sql_file='sql/user_merge.sql',
+    source_conn='bigquery_conn',
 )
 def merge_users(run_date):
     pass
@@ -149,13 +151,13 @@ def merge_users(run_date):
 
 ```python
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "test.preview"),
-    conflict_columns=["id"],
-    source_conn="bigquery_conn",
-    dry_run=True
+    output_table=Table('postgres_conn', 'test.preview'),
+    conflict_columns=['id'],
+    source_conn='bigquery_conn',
+    dry_run=True,
 )
 def preview_merge():
-    return "SELECT * FROM updates LIMIT 100"
+    return 'SELECT * FROM updates LIMIT 100'
 ```
 
 ## How It Works
@@ -173,26 +175,26 @@ def preview_merge():
 from airflow.decorators import dag
 from airsql import sql, Table
 
-@dag(schedule="@daily")
+
+@dag(schedule='@daily')
 def my_dag():
 
     @sql.extract_and_merge(
-        output_table=Table("postgres_conn", "warehouse.dimensions"),
-        conflict_columns=["dim_id"],
-        source_conn="bigquery_conn"
+        output_table=Table('postgres_conn', 'warehouse.dimensions'),
+        conflict_columns=['dim_id'],
+        source_conn='bigquery_conn',
     )
     def sync_dimensions():
         return "SELECT * FROM dim_updates WHERE date = '{{ ds }}'"
 
-    @sql.query(
-        output_table=Table("postgres_conn", "reports.fact_table")
-    )
+    @sql.query(output_table=Table('postgres_conn', 'reports.fact_table'))
     def process_facts():
         return "SELECT * FROM source_facts WHERE date = '{{ ds }}'"
 
     dimensions = sync_dimensions()
     facts = process_facts()
     facts.set_upstream(dimensions)
+
 
 my_dag()
 ```

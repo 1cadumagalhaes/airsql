@@ -42,9 +42,11 @@ uv add airsql
 ```python
 from airsql import sql
 
-@sql.dataframe(source_conn="postgres_conn")
+
+@sql.dataframe(source_conn='postgres_conn')
 def get_active_users():
-    return "SELECT * FROM users WHERE active = true"
+    return 'SELECT * FROM users WHERE active = true'
+
 
 df_task = get_active_users()
 ```
@@ -54,7 +56,8 @@ df_task = get_active_users()
 ```python
 from airsql import sql, Table
 
-@sql.query(output_table=Table("postgres_conn", "reports.daily_summary"))
+
+@sql.query(output_table=Table('postgres_conn', 'reports.daily_summary'))
 def create_daily_report():
     return """
     SELECT DATE(created_at) as date, COUNT(*) as total

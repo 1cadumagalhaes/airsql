@@ -9,13 +9,13 @@ from airsql.operators import SQLMergeOperator
 from airsql import Table
 
 merge_task = SQLMergeOperator(
-    task_id="upsert_users",
-    sql="SELECT id, name, email, updated_at FROM staging_users",
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"],
-    update_columns=["name", "email", "updated_at"],
-    source_conn="postgres_conn",
-    pre_truncate=False
+    task_id='upsert_users',
+    sql='SELECT id, name, email, updated_at FROM staging_users',
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['id'],
+    update_columns=['name', 'email', 'updated_at'],
+    source_conn='postgres_conn',
+    pre_truncate=False,
 )
 
 merge_task.execute(context)
@@ -40,13 +40,15 @@ merge_task.execute(context)
 ```python
 from airsql import sql, Table
 
+
 @sql.merge(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"],
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['id'],
+    source_conn='postgres_conn',
 )
 def upsert_users():
-    return "SELECT id, name, email, updated_at FROM staging_users"
+    return 'SELECT id, name, email, updated_at FROM staging_users'
+
 
 merge_task = upsert_users()
 ```
@@ -57,9 +59,9 @@ merge_task = upsert_users()
 
 ```python
 @sql.merge(
-    output_table=Table("postgres_conn", "public.products"),
-    conflict_columns=["sku"],
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'public.products'),
+    conflict_columns=['sku'],
+    source_conn='postgres_conn',
 )
 def sync_products():
     return """
@@ -72,9 +74,9 @@ def sync_products():
 
 ```python
 @sql.merge(
-    output_table=Table("postgres_conn", "analytics.daily_metrics"),
-    conflict_columns=["metric_date", "metric_name"],
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'analytics.daily_metrics'),
+    conflict_columns=['metric_date', 'metric_name'],
+    source_conn='postgres_conn',
 )
 def update_metrics():
     return """
@@ -93,10 +95,10 @@ Only update specific columns on conflict:
 
 ```python
 @sql.merge(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"],
-    update_columns=["name", "email", "last_login"],
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['id'],
+    update_columns=['name', 'email', 'last_login'],
+    source_conn='postgres_conn',
 )
 def update_user_profiles():
     return """
@@ -109,10 +111,10 @@ def update_user_profiles():
 
 ```python
 @sql.merge(
-    output_table=Table("postgres_conn", "reporting.current_state"),
-    conflict_columns=["entity_id"],
+    output_table=Table('postgres_conn', 'reporting.current_state'),
+    conflict_columns=['entity_id'],
     pre_truncate=True,
-    source_conn="postgres_conn"
+    source_conn='postgres_conn',
 )
 def rebuild_current_state():
     return """
@@ -126,25 +128,24 @@ def rebuild_current_state():
 
 ```python
 @sql.merge(
-    output_table=Table("postgres_conn", "warehouse.synced_data"),
-    conflict_columns=["id"]
+    output_table=Table('postgres_conn', 'warehouse.synced_data'),
+    conflict_columns=['id'],
 )
 def merge_from_bigquery(source_table):
-    return "SELECT * FROM {{ source_table }}"
+    return 'SELECT * FROM {{ source_table }}'
 
-task = merge_from_bigquery(
-    source_table=Table("bigquery_conn", "analytics.export_data")
-)
+
+task = merge_from_bigquery(source_table=Table('bigquery_conn', 'analytics.export_data'))
 ```
 
 ### Using SQL Files
 
 ```python
 @sql.merge(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["user_id", "event_date"],
-    update_columns=["event_count", "last_updated"],
-    sql_file="sql/user_events_merge.sql"
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['user_id', 'event_date'],
+    update_columns=['event_count', 'last_updated'],
+    sql_file='sql/user_events_merge.sql',
 )
 def merge_user_events(run_date):
     pass
@@ -193,14 +194,12 @@ already contain the same values.
 Temporary tables are automatically dropped after merge:
 
 ```python
-temp_table = Table("postgres_conn", "temp.staging", temporary=True)
+temp_table = Table('postgres_conn', 'temp.staging', temporary=True)
 
-@sql.merge(
-    output_table=temp_table,
-    conflict_columns=["id"]
-)
+
+@sql.merge(output_table=temp_table, conflict_columns=['id'])
 def process_batch():
-    return "SELECT * FROM batch_data"
+    return 'SELECT * FROM batch_data'
 ```
 
 ## Related Operations

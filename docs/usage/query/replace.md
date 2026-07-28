@@ -9,10 +9,10 @@ from airsql.operators import SQLReplaceOperator
 from airsql import Table
 
 replace_task = SQLReplaceOperator(
-    task_id="refresh_daily_report",
-    sql="SELECT DATE(created_at) as date, COUNT(*) as total FROM orders GROUP BY 1",
-    output_table=Table("postgres_conn", "reports.daily_summary"),
-    source_conn="postgres_conn"
+    task_id='refresh_daily_report',
+    sql='SELECT DATE(created_at) as date, COUNT(*) as total FROM orders GROUP BY 1',
+    output_table=Table('postgres_conn', 'reports.daily_summary'),
+    source_conn='postgres_conn',
 )
 
 replace_task.execute(context)
@@ -34,9 +34,10 @@ replace_task.execute(context)
 ```python
 from airsql import sql, Table
 
+
 @sql.replace(
-    output_table=Table("postgres_conn", "reports.daily_summary"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'reports.daily_summary'),
+    source_conn='postgres_conn',
 )
 def refresh_daily_report():
     return """
@@ -44,6 +45,7 @@ def refresh_daily_report():
     FROM orders
     GROUP BY DATE(created_at)
     """
+
 
 report_task = refresh_daily_report()
 ```
@@ -54,8 +56,8 @@ report_task = refresh_daily_report()
 
 ```python
 @sql.replace(
-    output_table=Table("postgres_conn", "cache.active_users_cache"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'cache.active_users_cache'),
+    source_conn='postgres_conn',
 )
 def refresh_user_cache():
     return """
@@ -68,9 +70,7 @@ def refresh_user_cache():
 ### Materialized View Replacement
 
 ```python
-@sql.replace(
-    output_table=Table("bigquery_conn", "reporting.mart_user_metrics")
-)
+@sql.replace(output_table=Table('bigquery_conn', 'reporting.mart_user_metrics'))
 def rebuild_user_metrics():
     return """
     SELECT 
@@ -86,23 +86,18 @@ def rebuild_user_metrics():
 ### Cross-Database Replacement
 
 ```python
-@sql.replace(
-    output_table=Table("postgres_conn", "warehouse.external_data")
-)
+@sql.replace(output_table=Table('postgres_conn', 'warehouse.external_data'))
 def sync_from_bigquery(source_table):
-    return f"SELECT * FROM {{ source_table }}"
+    return f'SELECT * FROM {{ source_table }}'
 
-task = sync_from_bigquery(
-    source_table=Table("bigquery_conn", "analytics.user_scores")
-)
+
+task = sync_from_bigquery(source_table=Table('bigquery_conn', 'analytics.user_scores'))
 ```
 
 ### Date-Partitioned Refresh
 
 ```python
-@sql.replace(
-    output_table=Table("postgres_conn", "reports.current_month_summary")
-)
+@sql.replace(output_table=Table('postgres_conn', 'reports.current_month_summary'))
 def monthly_summary():
     return """
     SELECT 
@@ -119,8 +114,8 @@ def monthly_summary():
 
 ```python
 @sql.replace(
-    output_table=Table("postgres_conn", "analytics.kpi_dashboard"),
-    sql_file="sql/kpi_dashboard.sql"
+    output_table=Table('postgres_conn', 'analytics.kpi_dashboard'),
+    sql_file='sql/kpi_dashboard.sql',
 )
 def refresh_kpis(report_date):
     pass

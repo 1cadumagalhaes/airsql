@@ -25,7 +25,7 @@ from airsql.sensors import PostgresSqlSensor
 wait_for_data = PostgresSqlSensor(
     task_id='wait_for_data',
     sql="SELECT COUNT(*) > 0 FROM daily_data WHERE date = '{{ ds }}'",
-    conn_id='postgres_default'
+    conn_id='postgres_default',
 )
 ```
 
@@ -57,10 +57,10 @@ from datetime import timedelta
 
 sensor = PostgresSqlSensor(
     task_id='wait_with_retries',
-    sql="SELECT COUNT(*) > 0 FROM late_arriving_data",
+    sql='SELECT COUNT(*) > 0 FROM late_arriving_data',
     conn_id='postgres_default',
     retries=3,
     poke_interval=60,
-    retry_delay=timedelta(minutes=5)
+    retry_delay=timedelta(minutes=5),
 )
 ```

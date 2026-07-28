@@ -16,19 +16,16 @@ The `Table` class is central to AirSQL's approach to database interactions. Unli
 from airsql import Table
 
 # Simple table reference
-users_table = Table(
-    conn_id="postgres_conn", 
-    table_name="public.users"
-)
+users_table = Table(conn_id='postgres_conn', table_name='public.users')
 
 # BigQuery table with advanced configuration
 analytics_table = Table(
-    conn_id="bigquery_conn",
-    table_name="analytics.user_events",
-    project="my-gcp-project",
-    partition_by="event_date",
-    cluster_by=["user_id", "event_type"],
-    location="US"
+    conn_id='bigquery_conn',
+    table_name='analytics.user_events',
+    project='my-gcp-project',
+    partition_by='event_date',
+    cluster_by=['user_id', 'event_type'],
+    location='US',
 )
 ```
 
@@ -59,10 +56,11 @@ def analyze_user_behavior(postgres_users, bigquery_events):
     GROUP BY u.id, u.name
     """
 
+
 # Usage in DAG
 analysis = analyze_user_behavior(
-    postgres_users=Table("postgres_conn", "public.users"),
-    bigquery_events=Table("bigquery_conn", "analytics.user_events")
+    postgres_users=Table('postgres_conn', 'public.users'),
+    bigquery_events=Table('bigquery_conn', 'analytics.user_events'),
 )
 ```
 
@@ -88,11 +86,11 @@ Templates can use variables from:
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.daily_summary"),
-    source_conn="postgres_conn",
-    sql_file="queries/daily_report.sql",
-    region="us-west",  # Available in template as {{ region }}
-    environment="production"
+    output_table=Table('postgres_conn', 'reports.daily_summary'),
+    source_conn='postgres_conn',
+    sql_file='queries/daily_report.sql',
+    region='us-west',  # Available in template as {{ region }}
+    environment='production',
 )
 def daily_report(date_param):  # Available in template as {{ date_param }}
     # Variables passed to template:
@@ -129,11 +127,10 @@ AirSQL provides two ways to create operators:
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.summary"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'reports.summary'), source_conn='postgres_conn'
 )
 def create_summary():
-    return "SELECT COUNT(*) as total FROM orders"
+    return 'SELECT COUNT(*) as total FROM orders'
 ```
 
 ### Direct Operator Approach
@@ -143,10 +140,10 @@ from airsql.operators import SQLQueryOperator
 from airsql import Table
 
 summary_task = SQLQueryOperator(
-    task_id="create_summary",
-    sql="SELECT COUNT(*) as total FROM orders",
-    output_table=Table("postgres_conn", "reports.summary"),
-    source_conn="postgres_conn"
+    task_id='create_summary',
+    sql='SELECT COUNT(*) as total FROM orders',
+    output_table=Table('postgres_conn', 'reports.summary'),
+    source_conn='postgres_conn',
 )
 ```
 
@@ -158,14 +155,15 @@ AirSQL supports Airflow's dynamic task mapping through the `dynamic_params` para
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.{{ region }}_summary"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'reports.{{ region }}_summary'),
+    source_conn='postgres_conn',
 )
 def regional_summary(region):
     return f"SELECT COUNT(*) as total FROM orders WHERE region = '{region}'"
 
+
 # Dynamic mapping
-regions = ["us-east", "us-west", "eu-central"]
+regions = ['us-east', 'us-west', 'eu-central']
 tasks = regional_summary.expand(region=regions)
 ```
 

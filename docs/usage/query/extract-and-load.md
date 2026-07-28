@@ -7,10 +7,11 @@ The `@sql.extract_and_load` decorator combines SQL extraction and DataFrame load
 ```python
 from airsql import sql, Table
 
+
 @sql.extract_and_load(
-    output_table=Table("postgres_conn", "analytics.daily_summary"),
-    source_conn="bigquery_conn",
-    if_exists="replace"
+    output_table=Table('postgres_conn', 'analytics.daily_summary'),
+    source_conn='bigquery_conn',
+    if_exists='replace',
 )
 def extract_daily_summary():
     return """
@@ -22,6 +23,7 @@ def extract_daily_summary():
     WHERE DATE(created_at) = '{{ ds }}'
     GROUP BY 1
     """
+
 
 load_task = extract_daily_summary()
 ```
@@ -44,9 +46,9 @@ load_task = extract_daily_summary()
 
 ```python
 @sql.extract_and_load(
-    output_table=Table("postgres_conn", "warehouse.events"),
-    source_conn="bigquery_conn",
-    if_exists="replace"
+    output_table=Table('postgres_conn', 'warehouse.events'),
+    source_conn='bigquery_conn',
+    if_exists='replace',
 )
 def sync_events():
     return """
@@ -60,9 +62,9 @@ def sync_events():
 
 ```python
 @sql.extract_and_load(
-    output_table=Table("postgres_conn", "archive.all_orders"),
-    source_conn="postgres_staging",
-    if_exists="append"
+    output_table=Table('postgres_conn', 'archive.all_orders'),
+    source_conn='postgres_staging',
+    if_exists='append',
 )
 def archive_orders():
     return """
@@ -76,10 +78,10 @@ def archive_orders():
 
 ```python
 @sql.extract_and_load(
-    output_table=Table("postgres_conn", "audit.sync_log"),
-    source_conn="bigquery_conn",
-    if_exists="append",
-    timestamp_column="loaded_at"
+    output_table=Table('postgres_conn', 'audit.sync_log'),
+    source_conn='bigquery_conn',
+    if_exists='append',
+    timestamp_column='loaded_at',
 )
 def log_sync():
     return """
@@ -95,10 +97,10 @@ def log_sync():
 
 ```python
 @sql.extract_and_load(
-    output_table=Table("postgres_conn", "reports.complex_report"),
-    source_conn="bigquery_conn",
-    sql_file="sql/complex_report.sql",
-    if_exists="replace"
+    output_table=Table('postgres_conn', 'reports.complex_report'),
+    source_conn='bigquery_conn',
+    sql_file='sql/complex_report.sql',
+    if_exists='replace',
 )
 def generate_report(report_date):
     pass
@@ -108,10 +110,10 @@ def generate_report(report_date):
 
 ```python
 @sql.extract_and_load(
-    output_table=Table("postgres_conn", "reports.{{ region }}_metrics"),
-    source_conn="bigquery_conn",
-    if_exists="replace",
-    region="us-west"
+    output_table=Table('postgres_conn', 'reports.{{ region }}_metrics'),
+    source_conn='bigquery_conn',
+    if_exists='replace',
+    region='us-west',
 )
 def regional_metrics(date_filter):
     return """
@@ -125,12 +127,12 @@ def regional_metrics(date_filter):
 
 ```python
 @sql.extract_and_load(
-    output_table=Table("postgres_conn", "test.preview"),
-    source_conn="bigquery_conn",
-    dry_run=True
+    output_table=Table('postgres_conn', 'test.preview'),
+    source_conn='bigquery_conn',
+    dry_run=True,
 )
 def preview_data():
-    return "SELECT * FROM large_table LIMIT 1000"
+    return 'SELECT * FROM large_table LIMIT 1000'
 ```
 
 ## How It Works
@@ -148,25 +150,25 @@ This decorator is TaskFlow-compatible and can be used in dependencies:
 from airflow.decorators import dag
 from airsql import sql, Table
 
-@dag(schedule="@daily")
+
+@dag(schedule='@daily')
 def my_dag():
 
     @sql.extract_and_load(
-        output_table=Table("postgres_conn", "staging.raw_data"),
-        source_conn="bigquery_conn",
-        if_exists="replace"
+        output_table=Table('postgres_conn', 'staging.raw_data'),
+        source_conn='bigquery_conn',
+        if_exists='replace',
     )
     def extract_raw():
         return "SELECT * FROM source WHERE date = '{{ ds }}'"
 
-    @sql.query(
-        output_table=Table("postgres_conn", "reports.final")
-    )
+    @sql.query(output_table=Table('postgres_conn', 'reports.final'))
     def process(raw_data):
-        return f"SELECT * FROM {raw_data} WHERE valid = true"
+        return f'SELECT * FROM {raw_data} WHERE valid = true'
 
     raw_data = extract_raw()
     process(raw_data)
+
 
 my_dag()
 ```

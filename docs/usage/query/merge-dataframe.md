@@ -12,16 +12,16 @@ from airsql import Table
 df = pd.DataFrame({
     'id': [1, 2, 3],
     'name': ['Alice', 'Bob', 'Charlie'],
-    'email': ['alice@example.com', 'bob@example.com', 'charlie@example.com']
+    'email': ['alice@example.com', 'bob@example.com', 'charlie@example.com'],
 })
 
 merge_task = DataFrameMergeOperator(
-    task_id="merge_users",
+    task_id='merge_users',
     dataframe=df,
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"],
-    update_columns=["name", "email"],
-    pre_truncate=False
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['id'],
+    update_columns=['name', 'email'],
+    pre_truncate=False,
 )
 
 merge_task.execute(context)
@@ -49,16 +49,17 @@ merge_task.execute(context)
 from airsql import sql, Table
 import pandas as pd
 
+
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"]
+    output_table=Table('postgres_conn', 'public.users'), conflict_columns=['id']
 )
 def sync_users():
     return pd.DataFrame({
         'id': [1, 2, 3],
         'name': ['Alice', 'Bob', 'Charlie'],
-        'email': ['alice@example.com', 'bob@example.com', 'charlie@example.com']
+        'email': ['alice@example.com', 'bob@example.com', 'charlie@example.com'],
     })
+
 
 merge_task = sync_users()
 ```
@@ -68,10 +69,11 @@ merge_task = sync_users()
 ```python
 df = pd.DataFrame({'id': [1, 2], 'value': [10, 20]})
 
+
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "staging.data"),
-    conflict_columns=["id"],
-    dataframe=df
+    output_table=Table('postgres_conn', 'staging.data'),
+    conflict_columns=['id'],
+    dataframe=df,
 )
 def merge_existing_data():
     pass
@@ -83,15 +85,14 @@ def merge_existing_data():
 
 ```python
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "inventory.products"),
-    conflict_columns=["sku"]
+    output_table=Table('postgres_conn', 'inventory.products'), conflict_columns=['sku']
 )
 def update_inventory():
     return pd.DataFrame({
         'sku': ['SKU001', 'SKU002', 'SKU003'],
         'name': ['Product A', 'Product B', 'Product C'],
         'quantity': [100, 50, 75],
-        'price': [19.99, 29.99, 39.99]
+        'price': [19.99, 29.99, 39.99],
     })
 ```
 
@@ -99,15 +100,15 @@ def update_inventory():
 
 ```python
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "analytics.daily_metrics"),
-    conflict_columns=["metric_date", "metric_name"],
-    update_columns=["metric_value"]
+    output_table=Table('postgres_conn', 'analytics.daily_metrics'),
+    conflict_columns=['metric_date', 'metric_name'],
+    update_columns=['metric_value'],
 )
 def update_daily_metrics():
     return pd.DataFrame({
         'metric_date': ['2024-01-01', '2024-01-01'],
         'metric_name': ['users', 'revenue'],
-        'metric_value': [1000, 50000]
+        'metric_value': [1000, 50000],
     })
 ```
 
@@ -117,9 +118,9 @@ Only update specific columns on conflict:
 
 ```python
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["user_id"],
-    update_columns=["name", "last_login"]
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['user_id'],
+    update_columns=['name', 'last_login'],
 )
 def update_user_profiles():
     return pd.DataFrame({
@@ -127,7 +128,7 @@ def update_user_profiles():
         'name': ['Updated Alice', 'Updated Bob'],
         'email': ['alice@example.com', 'bob@example.com'],
         'last_login': [pd.Timestamp.now(), pd.Timestamp.now()],
-        'created_at': [pd.Timestamp('2023-01-01'), pd.Timestamp('2023-01-02')]
+        'created_at': [pd.Timestamp('2023-01-01'), pd.Timestamp('2023-01-02')],
     })
 ```
 
@@ -135,15 +136,15 @@ def update_user_profiles():
 
 ```python
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "reporting.state"),
-    conflict_columns=["entity_id"],
-    pre_truncate=True
+    output_table=Table('postgres_conn', 'reporting.state'),
+    conflict_columns=['entity_id'],
+    pre_truncate=True,
 )
 def rebuild_state():
     return pd.DataFrame({
         'entity_id': [1, 2, 3],
         'state': ['active', 'inactive', 'pending'],
-        'updated_at': [pd.Timestamp.now()] * 3
+        'updated_at': [pd.Timestamp.now()] * 3,
     })
 ```
 
@@ -151,15 +152,15 @@ def rebuild_state():
 
 ```python
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "audit.change_log"),
-    conflict_columns=["change_id"],
-    timestamp_column="loaded_at"
+    output_table=Table('postgres_conn', 'audit.change_log'),
+    conflict_columns=['change_id'],
+    timestamp_column='loaded_at',
 )
 def load_changes():
     return pd.DataFrame({
         'change_id': [101, 102],
         'entity': ['user', 'order'],
-        'action': ['create', 'update']
+        'action': ['create', 'update'],
     })
 ```
 
@@ -167,9 +168,9 @@ def load_changes():
 
 ```python
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "test.data"),
-    conflict_columns=["id"],
-    dry_run=True
+    output_table=Table('postgres_conn', 'test.data'),
+    conflict_columns=['id'],
+    dry_run=True,
 )
 def test_merge():
     return pd.DataFrame({'id': [1, 2], 'value': [10, 20]})
@@ -211,12 +212,10 @@ IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.email, EXCLUDED.last_login)
 ## Temporary Tables
 
 ```python
-temp_table = Table("postgres_conn", "temp.staging", temporary=True)
+temp_table = Table('postgres_conn', 'temp.staging', temporary=True)
 
-@sql.merge_dataframe(
-    output_table=temp_table,
-    conflict_columns=["id"]
-)
+
+@sql.merge_dataframe(output_table=temp_table, conflict_columns=['id'])
 def process_batch():
     return pd.DataFrame({'id': [1, 2, 3]})
 ```

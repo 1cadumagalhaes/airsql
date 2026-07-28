@@ -11,7 +11,7 @@ wait_for_data = PostgresSqlSensor(
     task_id='wait_for_processing',
     sql="SELECT COUNT(*) FROM processing_queue WHERE status = 'complete'",
     conn_id='postgres_default',
-    retries=2
+    retries=2,
 )
 ```
 
@@ -38,7 +38,7 @@ wait_for_rows = PostgresSqlSensor(
         FROM daily_data
         WHERE date = '{{ ds }}'
     """,
-    conn_id='postgres_default'
+    conn_id='postgres_default',
 )
 ```
 
@@ -56,7 +56,7 @@ wait_for_parent = PostgresSqlSensor(
         )
     """,
     conn_id='postgres_default',
-    poke_interval=30
+    poke_interval=30,
 )
 ```
 
@@ -65,10 +65,10 @@ wait_for_parent = PostgresSqlSensor(
 ```python
 wait_for_queue = PostgresSqlSensor(
     task_id='wait_for_queue_empty',
-    sql="SELECT COUNT(*) = 0 FROM processing_queue",
+    sql='SELECT COUNT(*) = 0 FROM processing_queue',
     conn_id='postgres_default',
     retries=10,
-    poke_interval=60
+    poke_interval=60,
 )
 ```
 
@@ -82,7 +82,7 @@ check_no_nulls = PostgresSqlSensor(
         FROM staging_data
         WHERE id IS NULL OR created_at IS NULL
     """,
-    conn_id='postgres_default'
+    conn_id='postgres_default',
 )
 ```
 
@@ -100,7 +100,7 @@ validate_data = PostgresSqlSensor(
         WHERE created_at >= '{{ ds }}'
     """,
     conn_id='postgres_default',
-    timeout=3600
+    timeout=3600,
 )
 ```
 
@@ -116,7 +116,7 @@ sensor = PostgresSqlSensor(
     retries=5,
     poke_interval=120,
     timeout=7200,
-    retry_delay=timedelta(minutes=2)
+    retry_delay=timedelta(minutes=2),
 )
 ```
 
@@ -127,20 +127,22 @@ from airflow.decorators import dag
 from airsql.sensors import PostgresSqlSensor
 from airsql import sql, Table
 
-@dag(schedule="@daily")
+
+@dag(schedule='@daily')
 def pipeline():
 
     wait_for_source = PostgresSqlSensor(
         task_id='wait_for_source',
         sql="SELECT COUNT(*) > 0 FROM raw_data WHERE date = '{{ ds }}'",
-        conn_id='postgres_default'
+        conn_id='postgres_default',
     )
 
-    @sql.query(output_table=Table("postgres_conn", "warehouse.processed"))
+    @sql.query(output_table=Table('postgres_conn', 'warehouse.processed'))
     def process():
         return "SELECT * FROM raw_data WHERE date = '{{ ds }}'"
 
     wait_for_source >> process()
+
 
 pipeline()
 ```

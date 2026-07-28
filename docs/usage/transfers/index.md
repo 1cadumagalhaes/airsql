@@ -29,7 +29,7 @@ transfer = PostgresToBigQueryOperator(
     sql='SELECT * FROM orders WHERE date = {{ ds }}',
     destination_project_dataset_table='my-project.staging.orders',
     postgres_conn_id='postgres_default',
-    gcs_bucket='temp-bucket'
+    gcs_bucket='temp-bucket',
 )
 ```
 
@@ -46,7 +46,7 @@ transfer = PostgresToBigQueryOperator(
     destination_project_dataset_table='project.staging.data',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    dry_run=True
+    dry_run=True,
 )
 ```
 
@@ -61,7 +61,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='staging.table',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    cleanup_temp_files=True
+    cleanup_temp_files=True,
 )
 ```
 
@@ -79,7 +79,7 @@ transfer = PostgresToGCSOperator(
     bucket='export-bucket',
     filename='data.csv',
     retries=3,
-    retry_delay=timedelta(minutes=5)
+    retry_delay=timedelta(minutes=5),
 )
 ```
 
@@ -92,7 +92,8 @@ from airflow.decorators import dag
 from airsql.transfers import PostgresToBigQueryOperator
 from airsql.sensors import BigQuerySqlSensor
 
-@dag(schedule="@daily")
+
+@dag(schedule='@daily')
 def etl_pipeline():
 
     export = PostgresToBigQueryOperator(
@@ -100,16 +101,17 @@ def etl_pipeline():
         sql='SELECT * FROM source WHERE date = {{ ds }}',
         destination_project_dataset_table='project.staging.data_{{ ds_nodash }}',
         postgres_conn_id='postgres_default',
-        gcs_bucket='temp-bucket'
+        gcs_bucket='temp-bucket',
     )
 
     validate = BigQuerySqlSensor(
         task_id='validate_data',
-        sql="SELECT COUNT(*) > 0 FROM project.staging.data_{{ ds_nodash }}",
-        conn_id='bigquery_default'
+        sql='SELECT COUNT(*) > 0 FROM project.staging.data_{{ ds_nodash }}',
+        conn_id='bigquery_default',
     )
 
     export >> validate
+
 
 etl_pipeline()
 ```
@@ -121,7 +123,8 @@ from airflow.decorators import dag
 from airsql.transfers import BigQueryToPostgresOperator
 from airsql.sensors import PostgresSqlSensor
 
-@dag(schedule="@daily")
+
+@dag(schedule='@daily')
 def bq_to_pg_pipeline():
 
     transfer = BigQueryToPostgresOperator(
@@ -129,16 +132,17 @@ def bq_to_pg_pipeline():
         source_project_dataset_table='project.analytics.data_{{ ds_nodash }}',
         destination_table='warehouse.daily_data',
         postgres_conn_id='postgres_default',
-        gcs_bucket='temp-bucket'
+        gcs_bucket='temp-bucket',
     )
 
     validate = PostgresSqlSensor(
         task_id='validate_transfer',
-        sql="SELECT COUNT(*) > 0 FROM warehouse.daily_data WHERE date = {{ ds }}",
-        conn_id='postgres_default'
+        sql='SELECT COUNT(*) > 0 FROM warehouse.daily_data WHERE date = {{ ds }}',
+        conn_id='postgres_default',
     )
 
     transfer >> validate
+
 
 bq_to_pg_pipeline()
 ```

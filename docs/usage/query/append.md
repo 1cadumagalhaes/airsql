@@ -9,10 +9,10 @@ from airsql.operators import SQLAppendOperator
 from airsql import Table
 
 append_task = SQLAppendOperator(
-    task_id="append_daily_data",
+    task_id='append_daily_data',
     sql="SELECT * FROM source WHERE date = '{{ ds }}'",
-    output_table=Table("postgres_conn", "warehouse.daily_events"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'warehouse.daily_events'),
+    source_conn='postgres_conn',
 )
 
 append_task.execute(context)
@@ -34,12 +34,14 @@ append_task.execute(context)
 ```python
 from airsql import sql, Table
 
+
 @sql.append(
-    output_table=Table("postgres_conn", "warehouse.daily_events"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'warehouse.daily_events'),
+    source_conn='postgres_conn',
 )
 def append_daily_data():
     return "SELECT * FROM source_table WHERE date = '{{ ds }}'"
+
 
 append_task = append_daily_data()
 ```
@@ -50,8 +52,8 @@ append_task = append_daily_data()
 
 ```python
 @sql.append(
-    output_table=Table("postgres_conn", "analytics.events_archive"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'analytics.events_archive'),
+    source_conn='postgres_conn',
 )
 def archive_events():
     return """
@@ -64,9 +66,7 @@ def archive_events():
 ### Multi-Source Append
 
 ```python
-@sql.append(
-    output_table=Table("bigquery_conn", "warehouse.combined_data")
-)
+@sql.append(output_table=Table('bigquery_conn', 'warehouse.combined_data'))
 def combine_sources(source_a, source_b):
     return """
     SELECT * FROM {{ source_a }}
@@ -74,9 +74,10 @@ def combine_sources(source_a, source_b):
     SELECT * FROM {{ source_b }}
     """
 
+
 task = combine_sources(
-    source_a=Table("postgres_conn", "public.data_v1"),
-    source_b=Table("postgres_conn", "public.data_v2")
+    source_a=Table('postgres_conn', 'public.data_v1'),
+    source_b=Table('postgres_conn', 'public.data_v2'),
 )
 ```
 
@@ -84,8 +85,8 @@ task = combine_sources(
 
 ```python
 @sql.append(
-    output_table=Table("postgres_conn", "staging.incoming"),
-    sql_file="sql/incremental_load.sql"
+    output_table=Table('postgres_conn', 'staging.incoming'),
+    sql_file='sql/incremental_load.sql',
 )
 def incremental_load(batch_id):
     pass
@@ -95,12 +96,12 @@ def incremental_load(batch_id):
 
 ```python
 @sql.append(
-    output_table=Table("postgres_conn", "archive.data"),
-    source_conn="postgres_conn",
-    dry_run=True
+    output_table=Table('postgres_conn', 'archive.data'),
+    source_conn='postgres_conn',
+    dry_run=True,
 )
 def test_append():
-    return "SELECT * FROM source LIMIT 1000"
+    return 'SELECT * FROM source LIMIT 1000'
 ```
 
 ## Behavior
@@ -116,11 +117,12 @@ def test_append():
 When using tables marked as `temporary=True`, they are automatically dropped after the append operation:
 
 ```python
-temp_table = Table("postgres_conn", "temp.staging", temporary=True)
+temp_table = Table('postgres_conn', 'temp.staging', temporary=True)
+
 
 @sql.append(output_table=temp_table)
 def stage_data():
-    return "SELECT * FROM raw_data WHERE processed = false"
+    return 'SELECT * FROM raw_data WHERE processed = false'
 ```
 
 ## Use Cases
