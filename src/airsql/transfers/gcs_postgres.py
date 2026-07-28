@@ -129,7 +129,7 @@ class GCSToPostgresOperator(BaseOperator):
         }
 
     @staticmethod
-    def _dataframe_to_tuples(df):
+    def _iter_dataframe_tuples(df):
         """Convert DataFrame to tuples with proper type conversion for PostgreSQL.
 
         Handles both PyArrow-backed and standard pandas DataFrames efficiently.
@@ -156,10 +156,13 @@ class GCSToPostgresOperator(BaseOperator):
                 return bool(val)
             return val
 
-        return [
-            tuple(convert_value(v) for v in row)
-            for row in df.itertuples(index=False, name=None)
-        ]
+        for row in df.itertuples(index=False, name=None):
+            yield tuple(convert_value(v) for v in row)
+
+    @staticmethod
+    def _dataframe_to_tuples(df):
+        """Return converted rows as a list for compatibility with callers."""
+        return list(GCSToPostgresOperator._iter_dataframe_tuples(df))
 
     @staticmethod
     def _convert_json_columns_to_strings(df, json_columns=None):
@@ -627,7 +630,7 @@ class GCSToPostgresOperator(BaseOperator):
             else sql_mod.Identifier(table_name_simple)
         )
 
-        data_tuples = self._dataframe_to_tuples(df_filtered)
+        data_tuples = self._iter_dataframe_tuples(df_filtered)
 
         if not is_psycopg2:
             copy_sql = sql_mod.SQL('COPY {table} ({columns}) FROM STDIN').format(
@@ -834,8 +837,8 @@ class GCSToPostgresOperator(BaseOperator):
 
     def _get_total_file_size_mb(self, gcs_hook, object_names: list[str]) -> float:
         total_size_bytes = sum(
-            len(
-                gcs_hook.download(bucket_name=self.bucket_name, object_name=object_name)
+            gcs_hook.get_size(
+                bucket_name=self.bucket_name, object_name=object_name
             )
             for object_name in object_names
         )
