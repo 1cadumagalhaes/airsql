@@ -13,7 +13,7 @@ import_data = GCSToPostgresOperator(
     object_name='exports/users.jsonl',
     target_table_name='staging.import_table',
     postgres_conn_id='postgres_default',
-    gcp_conn_id='google_cloud_default'
+    gcp_conn_id='google_cloud_default',
 )
 ```
 
@@ -33,6 +33,7 @@ import_data = GCSToPostgresOperator(
 | `grant_table_privileges` | `bool` | No | Grant ALL privileges to PUBLIC (default: True) |
 | `source_schema` | `dict` | No | Source column types for type coercion |
 | `postgres_type_overrides` | `dict[str, str]` | No | Per-column PostgreSQL type hints used when creating destination tables |
+| `batch_size` | `int` | No | Rows read and loaded per batch for append/replace imports (default: 50000) |
 | `dry_run` | `bool` | No | Simulate without writing |
 
 ## Examples
@@ -45,7 +46,7 @@ import_task = GCSToPostgresOperator(
     bucket_name='data-bucket',
     object_name='exports/users.csv',
     target_table_name='staging.users',
-    postgres_conn_id='postgres_default'
+    postgres_conn_id='postgres_default',
 )
 ```
 
@@ -57,7 +58,7 @@ import_task = GCSToPostgresOperator(
     bucket_name='data-bucket',
     object_name='exports/events.jsonl',
     target_table_name='staging.events',
-    postgres_conn_id='postgres_default'
+    postgres_conn_id='postgres_default',
 )
 ```
 
@@ -69,7 +70,7 @@ import_task = GCSToPostgresOperator(
     bucket_name='data-bucket',
     object_name='exports/data.parquet',
     target_table_name='warehouse.data',
-    postgres_conn_id='postgres_default'
+    postgres_conn_id='postgres_default',
 )
 ```
 
@@ -86,7 +87,7 @@ import_task = GCSToPostgresOperator(
     object_name='exports/user_updates.parquet',
     target_table_name='public.users',
     postgres_conn_id='postgres_default',
-    conflict_columns=['id']
+    conflict_columns=['id'],
 )
 ```
 
@@ -104,7 +105,7 @@ import_task = GCSToPostgresOperator(
     object_name='exports/full_export.jsonl',
     target_table_name='warehouse.full_data',
     postgres_conn_id='postgres_default',
-    replace=True
+    replace=True,
 )
 ```
 
@@ -117,7 +118,7 @@ import_task = GCSToPostgresOperator(
     object_name='exports/new_table.csv',
     target_table_name='staging.new_table',
     postgres_conn_id='postgres_default',
-    create_if_missing=True
+    create_if_missing=True,
 )
 ```
 
@@ -130,7 +131,7 @@ import_task = GCSToPostgresOperator(
     object_name='exports/might_be_empty.csv',
     target_table_name='staging.data',
     postgres_conn_id='postgres_default',
-    create_if_empty=True
+    create_if_empty=True,
 )
 ```
 
@@ -143,11 +144,7 @@ import_task = GCSToPostgresOperator(
     object_name='exports/data.parquet',
     target_table_name='public.data',
     postgres_conn_id='postgres_default',
-    source_schema={
-        'id': 'INTEGER',
-        'amount': 'FLOAT',
-        'created_at': 'TIMESTAMP'
-    }
+    source_schema={'id': 'INTEGER', 'amount': 'FLOAT', 'created_at': 'TIMESTAMP'},
 )
 ```
 
@@ -184,7 +181,7 @@ import_task = GCSToPostgresOperator(
     object_name='exports/large_file.parquet',
     target_table_name='staging.test',
     postgres_conn_id='postgres_default',
-    dry_run=True
+    dry_run=True,
 )
 ```
 

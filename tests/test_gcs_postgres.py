@@ -688,13 +688,15 @@ class TestPartitionExchange:
         create_partition_calls = [
             call
             for call in cursor.execute.call_args_list
-            if 'FOR VALUES FROM' in call.args[0]
+            if 'FOR VALUES FROM' in str(call.args[0])
         ]
 
         assert len(create_partition_calls) == 1
-        sql = create_partition_calls[0].args[0]
-        assert "FOR VALUES FROM ('2025-02-02'::DATE)" in sql
-        assert "TO ('2025-02-03'::DATE)" in sql
+        sql = str(create_partition_calls[0].args[0])
+        assert 'FOR VALUES FROM (' in sql
+        assert '2025-02-02' in sql
+        assert '2025-02-03' in sql
+        assert "SQL('DATE')" in sql
 
     def test_partition_exchange_uses_bounded_temp_table_name(self):
         op = GCSToPostgresOperator(
@@ -834,3 +836,58 @@ class TestGCSObjectResolution:
             'temp/export/data-000000000000.parquet',
             'temp/export/data-000000000001.parquet',
         ]
+
+
+class TestBoundedGCSLoading:
+    def test_csv_reader_yields_configured_batches(self, tmp_path):
+        source = tmp_path / 'source.csv'
+        source.write_text('id,name\n1,one\n2,two\n3,three\n', encoding='utf-8')
+
+        class FakeGCSHook:
+            def download(self, bucket_name, object_name, filename):
+                with (
+                    open(source, 'rb') as input_file,
+                    open(filename, 'wb') as output_file,
+                ):
+                    output_file.write(input_file.read())
+
+        operator = GCSToPostgresOperator(
+            task_id='test_task',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='source.csv',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+            batch_size=2,
+        )
+
+        batches = list(
+            operator._iter_dataframes_from_gcs_objects(
+                FakeGCSHook(), ['source.csv'], 'csv'
+            )
+        )
+
+        assert [len(batch) for batch in batches] == [2, 1]
+        assert batches[0]['id'].tolist() == [1, 2]
+
+    def test_file_size_uses_gcs_metadata(self):
+        class FakeGCSHook:
+            def get_size(self, bucket_name, object_name):
+                return {'one.csv': 1024, 'two.csv': 2048}[object_name]
+
+            def download(self, **kwargs):
+                raise AssertionError('file size must not download objects')
+
+        operator = GCSToPostgresOperator(
+            task_id='test_task',
+            target_table_name='public.test_table',
+            bucket_name='test-bucket',
+            object_name='*.csv',
+            postgres_conn_id='postgres',
+            gcp_conn_id='gcp',
+        )
+
+        assert (
+            operator._get_total_file_size_mb(FakeGCSHook(), ['one.csv', 'two.csv'])
+            == 0.0029296875
+        )

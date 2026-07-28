@@ -1178,3 +1178,52 @@ class TestSchemaExport:
             with pg_engine.connect() as conn:
                 conn.execute(text('DROP TABLE IF EXISTS test_schema_switch'))
                 conn.commit()
+
+
+class TestPostgresExportShards:
+    def test_chunked_export_rotates_gcs_shards(self, pg_engine):
+        import re
+        from unittest.mock import MagicMock, patch
+
+        from airsql.transfers.postgres_gcs import PostgresToGCSOperator
+
+        uploads = {}
+
+        def capture_upload(
+            bucket_name, object_name, data=None, filename=None, **kwargs
+        ):
+            if filename:
+                with open(filename, 'rb') as file_obj:
+                    uploads[object_name] = file_obj.read()
+            elif data:
+                uploads[object_name] = data
+
+        mock_gcs = MagicMock()
+        mock_gcs.upload = capture_upload
+        operator = PostgresToGCSOperator(
+            task_id='shard_export',
+            postgres_conn_id='unused',
+            sql="SELECT * FROM (VALUES (1, 'one'), (2, 'two'), (3, 'three')) AS data(id, name)",
+            bucket='bucket',
+            filename='exports/data.csv',
+            export_format='csv',
+            pandas_chunksize=1,
+            shard_size_mb=0.000001,
+        )
+
+        with (
+            patch('airsql.transfers.postgres_gcs.PostgresHook') as mock_pg,
+            patch('airsql.transfers.postgres_gcs.GCSHook', return_value=mock_gcs),
+        ):
+            mock_pg.return_value.get_sqlalchemy_engine.return_value = pg_engine
+            mock_pg.return_value.get_records.return_value = []
+            operator.execute({})
+
+        assert len(uploads) == 3
+        assert all(
+            re.fullmatch(r'exports/data-[0-9a-f]{12}-0000[0-2]\.csv', name)
+            for name in uploads
+        )
+        assert re.fullmatch(r'exports/data-[0-9a-f]{12}-\*\.csv', operator.filename)
+        mock_gcs.list.assert_not_called()
+        assert sum(payload.count(b'\n') for payload in uploads.values()) == 6

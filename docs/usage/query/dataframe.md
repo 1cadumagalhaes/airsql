@@ -8,9 +8,9 @@ The `@sql.dataframe` decorator and `SQLDataFrameOperator` execute SQL queries an
 from airsql.operators import SQLDataFrameOperator
 
 df_task = SQLDataFrameOperator(
-    task_id="get_active_users",
-    sql="SELECT * FROM users WHERE active = true",
-    source_conn="postgres_conn"
+    task_id='get_active_users',
+    sql='SELECT * FROM users WHERE active = true',
+    source_conn='postgres_conn',
 )
 
 df_task.execute(context)
@@ -30,9 +30,11 @@ df_task.execute(context)
 ```python
 from airsql import sql
 
-@sql.dataframe(source_conn="postgres_conn")
+
+@sql.dataframe(source_conn='postgres_conn')
 def get_active_users():
-    return "SELECT * FROM users WHERE active = true"
+    return 'SELECT * FROM users WHERE active = true'
+
 
 df_task = get_active_users()
 ```
@@ -52,12 +54,14 @@ df_task = get_active_users()
 ```python
 from airsql import sql
 
-@sql.dataframe(source_conn="postgres_conn")
+
+@sql.dataframe(source_conn='postgres_conn')
 def get_active_users():
-    return "SELECT * FROM users WHERE active = true"
+    return 'SELECT * FROM users WHERE active = true'
+
 
 # Use in DAG
-with DAG("example_dag", ...) as dag:
+with DAG('example_dag', ...) as dag:
     df_task = get_active_users()
 ```
 
@@ -65,6 +69,7 @@ with DAG("example_dag", ...) as dag:
 
 ```python
 from airsql import sql, Table
+
 
 @sql.dataframe
 def analyze_user_behavior(users_table, events_table):
@@ -78,20 +83,18 @@ def analyze_user_behavior(users_table, events_table):
     GROUP BY u.id, u.name
     """
 
+
 # Use with different database tables
 analysis = analyze_user_behavior(
-    users_table=Table("postgres_conn", "public.users"),
-    events_table=Table("bigquery_conn", "analytics.user_events")
+    users_table=Table('postgres_conn', 'public.users'),
+    events_table=Table('bigquery_conn', 'analytics.user_events'),
 )
 ```
 
 ### Using SQL Files
 
 ```python
-@sql.dataframe(
-    source_conn="postgres_conn",
-    sql_file="queries/complex_analysis.sql"
-)
+@sql.dataframe(source_conn='postgres_conn', sql_file='queries/complex_analysis.sql')
 def complex_analysis(start_date, end_date):
     pass
 ```
@@ -102,24 +105,26 @@ def complex_analysis(start_date, end_date):
 from airflow.decorators import dag, task
 from airsql import sql
 
-@dag(schedule="@daily")
+
+@dag(schedule='@daily')
 def my_dag():
 
-    @sql.dataframe(source_conn="postgres_conn")
+    @sql.dataframe(source_conn='postgres_conn')
     def extract_users():
         return "SELECT * FROM users WHERE created_at >= '{{ ds }}'"
 
     @task
     def process_users(df):
-        return df.groupby("region").size().to_dict()
+        return df.groupby('region').size().to_dict()
 
     @task
     def save_results(results):
-        print(f"Users by region: {results}")
+        print(f'Users by region: {results}')
 
     users_df = extract_users()
     processed = process_users(users_df)
     save_results(processed)
+
 
 my_dag()
 ```
@@ -141,9 +146,10 @@ def compare_databases(source_a, source_b):
     SELECT * FROM b_data
     """
 
+
 result = compare_databases(
-    source_a=Table("postgres_prod", "public.orders"),
-    source_b=Table("postgres_staging", "public.orders")
+    source_a=Table('postgres_prod', 'public.orders'),
+    source_b=Table('postgres_staging', 'public.orders'),
 )
 ```
 

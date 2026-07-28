@@ -9,11 +9,11 @@ from airsql.operators import SQLQueryOperator
 from airsql import Table
 
 query_task = SQLQueryOperator(
-    task_id="create_daily_report",
-    sql="SELECT DATE(created_at) as date, COUNT(*) as total FROM orders GROUP BY 1",
-    output_table=Table("postgres_conn", "reports.daily_summary"),
-    source_conn="postgres_conn",
-    pre_truncate=False
+    task_id='create_daily_report',
+    sql='SELECT DATE(created_at) as date, COUNT(*) as total FROM orders GROUP BY 1',
+    output_table=Table('postgres_conn', 'reports.daily_summary'),
+    source_conn='postgres_conn',
+    pre_truncate=False,
 )
 
 query_task.execute(context)
@@ -36,9 +36,10 @@ query_task.execute(context)
 ```python
 from airsql import sql, Table
 
+
 @sql.query(
-    output_table=Table("postgres_conn", "reports.daily_summary"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'reports.daily_summary'),
+    source_conn='postgres_conn',
 )
 def create_daily_report():
     return """
@@ -46,6 +47,7 @@ def create_daily_report():
     FROM orders
     GROUP BY DATE(created_at)
     """
+
 
 report_task = create_daily_report()
 ```
@@ -68,9 +70,10 @@ report_task = create_daily_report()
 ```python
 from airsql import sql, Table
 
+
 @sql.query(
-    output_table=Table("postgres_conn", "analytics.user_stats"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'analytics.user_stats'),
+    source_conn='postgres_conn',
 )
 def get_user_statistics():
     return """
@@ -88,9 +91,7 @@ def get_user_statistics():
 ### Query with Table References
 
 ```python
-@sql.query(
-    output_table=Table("postgres_conn", "reports.cross_db_analysis")
-)
+@sql.query(output_table=Table('postgres_conn', 'reports.cross_db_analysis'))
 def analyze_cross_source(users_table, orders_table):
     return """
     SELECT 
@@ -102,9 +103,10 @@ def analyze_cross_source(users_table, orders_table):
     GROUP BY u.id, u.name
     """
 
+
 task = analyze_cross_source(
-    users_table=Table("postgres_conn", "public.users"),
-    orders_table=Table("bigquery_conn", "analytics.orders")
+    users_table=Table('postgres_conn', 'public.users'),
+    orders_table=Table('bigquery_conn', 'analytics.orders'),
 )
 ```
 
@@ -112,9 +114,9 @@ task = analyze_cross_source(
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.monthly_summary"),
-    source_conn="postgres_conn",
-    sql_file="queries/monthly_report.sql"
+    output_table=Table('postgres_conn', 'reports.monthly_summary'),
+    source_conn='postgres_conn',
+    sql_file='queries/monthly_report.sql',
 )
 def monthly_report(start_date, end_date):
     pass
@@ -124,9 +126,9 @@ def monthly_report(start_date, end_date):
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "cache.user_cache"),
-    source_conn="postgres_conn",
-    pre_truncate=True
+    output_table=Table('postgres_conn', 'cache.user_cache'),
+    source_conn='postgres_conn',
+    pre_truncate=True,
 )
 def refresh_user_cache():
     return """
@@ -140,21 +142,21 @@ def refresh_user_cache():
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.test_report"),
-    source_conn="postgres_conn",
-    dry_run=True
+    output_table=Table('postgres_conn', 'reports.test_report'),
+    source_conn='postgres_conn',
+    dry_run=True,
 )
 def test_query():
-    return "SELECT * FROM large_table LIMIT 1000000"
+    return 'SELECT * FROM large_table LIMIT 1000000'
 ```
 
 ### Jinja Templating
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.custom_report"),
-    source_conn="postgres_conn",
-    region='us-west'
+    output_table=Table('postgres_conn', 'reports.custom_report'),
+    source_conn='postgres_conn',
+    region='us-west',
 )
 def custom_report(date_filter, status_filter):
     return """

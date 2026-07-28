@@ -3,6 +3,7 @@ Enhanced PostgreSQL to BigQuery transfer operator with sensor validation
 and asset emission.
 """
 
+import fnmatch
 from typing import Any, Iterable, List, Optional
 
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -86,6 +87,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         schema_filename: Optional[str] = None,
         schema_overrides: Optional[dict[str, str]] = None,
         pandas_chunksize: int = 100000,
+        shard_size_mb: Optional[float] = None,
         use_copy: bool = False,
         use_temp_file: bool = False,
         check_source_exists: bool = True,
@@ -142,6 +144,7 @@ class PostgresToBigQueryOperator(BaseOperator):
         self.schema_filename = schema_filename
         self.schema_overrides = schema_overrides or {}
         self.pandas_chunksize = pandas_chunksize
+        self.shard_size_mb = shard_size_mb
         self.use_copy = use_copy
         self.use_temp_file = use_temp_file
         if self.export_format == 'parquet':
@@ -276,6 +279,7 @@ class PostgresToBigQueryOperator(BaseOperator):
             schema_filename=actual_schema_filename,
             schema_overrides=self.schema_overrides,
             pandas_chunksize=self.pandas_chunksize,
+            shard_size_mb=self.shard_size_mb,
             use_copy=self.use_copy,
             use_temp_file=self.use_temp_file,
             auto_switch_format=self.auto_switch_format,
@@ -421,10 +425,22 @@ class PostgresToBigQueryOperator(BaseOperator):
         try:
             gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
             for cleanup_path in unique_cleanup_paths:
-                self.log.info(
-                    f'Cleaning up temporary file: gs://{self.gcs_bucket}/{cleanup_path}'
-                )
-                gcs_hook.delete(bucket_name=self.gcs_bucket, object_name=cleanup_path)
+                paths = [cleanup_path]
+                if '*' in cleanup_path:
+                    wildcard_index = cleanup_path.index('*')
+                    prefix = cleanup_path[:wildcard_index]
+                    paths = [
+                        path
+                        for path in gcs_hook.list(
+                            bucket_name=self.gcs_bucket, prefix=prefix
+                        )
+                        if fnmatch.fnmatch(path, cleanup_path)
+                    ]
+                for path in paths:
+                    self.log.info(
+                        f'Cleaning up temporary file: gs://{self.gcs_bucket}/{path}'
+                    )
+                    gcs_hook.delete(bucket_name=self.gcs_bucket, object_name=path)
             self.log.info('Temporary file cleanup completed')
         except Exception as e:
             self.log.warning(f'Failed to cleanup temporary file: {e}')

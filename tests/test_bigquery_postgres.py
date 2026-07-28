@@ -503,6 +503,7 @@ class TestExecuteParameterForwarding:
             cleanup_temp_files=False,
             dry_run=True,
             postgres_type_overrides=overrides,
+            batch_size=1234,
             emit_asset=False,
         )
 
@@ -523,3 +524,4 @@ class TestExecuteParameterForwarding:
         assert (
             mock_loader_class.call_args.kwargs['postgres_type_overrides'] == overrides
         )
+        assert mock_loader_class.call_args.kwargs['batch_size'] == 1234

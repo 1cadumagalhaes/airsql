@@ -13,7 +13,7 @@ transfer = PostgresToBigQueryOperator(
     destination_project_dataset_table='my-project.analytics.monthly_reports',
     postgres_conn_id='postgres_default',
     gcp_conn_id='google_cloud_default',
-    gcs_bucket='temp-export-bucket'
+    gcs_bucket='temp-export-bucket',
 )
 ```
 
@@ -32,6 +32,7 @@ transfer = PostgresToBigQueryOperator(
 | `schema_filename` | `str` | No | Path for BigQuery schema JSON |
 | `schema_overrides` | `dict[str, str]` | No | Override inferred BigQuery types by field name |
 | `pandas_chunksize` | `int` | No | Rows per chunk for large exports |
+| `shard_size_mb` | `float` | No | Maximum uploaded shard size when chunked extraction is enabled |
 | `use_copy` | `bool` | No | Use COPY for streaming (default: False) |
 | `write_disposition` | `str` | No | WRITE_TRUNCATE, WRITE_APPEND (default: WRITE_TRUNCATE) |
 | `partition_by` | `str` | No | Partition column for BigQuery |
@@ -52,7 +53,7 @@ export = PostgresToBigQueryOperator(
     sql='SELECT * FROM orders WHERE created_at >= CURRENT_DATE',
     destination_project_dataset_table='my-project.staging.orders',
     postgres_conn_id='postgres_default',
-    gcs_bucket='export-bucket'
+    gcs_bucket='export-bucket',
 )
 ```
 
@@ -64,7 +65,7 @@ export = PostgresToBigQueryOperator(
     source_project_dataset_table='public.users',
     destination_project_dataset_table='my-project.staging.users',
     postgres_conn_id='postgres_default',
-    gcs_bucket='export-bucket'
+    gcs_bucket='export-bucket',
 )
 ```
 
@@ -79,7 +80,7 @@ export = PostgresToBigQueryOperator(
     gcs_bucket='export-bucket',
     partition_by='event_date',
     partition_type='DAY',
-    cluster_fields=['user_id', 'event_type']
+    cluster_fields=['user_id', 'event_type'],
 )
 ```
 
@@ -96,7 +97,7 @@ export = PostgresToBigQueryOperator(
     destination_project_dataset_table='my-project.analytics.transactions',
     postgres_conn_id='postgres_default',
     gcs_bucket='export-bucket',
-    write_disposition='WRITE_APPEND'
+    write_disposition='WRITE_APPEND',
 )
 ```
 
@@ -114,7 +115,7 @@ export = PostgresToBigQueryOperator(
     postgres_conn_id='postgres_default',
     gcs_bucket='export-bucket',
     use_copy=True,
-    pandas_chunksize=50000
+    pandas_chunksize=50000,
 )
 ```
 
@@ -128,7 +129,7 @@ export = PostgresToBigQueryOperator(
     postgres_conn_id='postgres_default',
     gcs_bucket='export-bucket',
     export_format='jsonl',
-    schema_filename='schemas/events.json'
+    schema_filename='schemas/events.json',
 )
 ```
 
@@ -172,7 +173,7 @@ export = PostgresToBigQueryOperator(
     destination_project_dataset_table='my-project.staging.data',
     postgres_conn_id='postgres_default',
     gcs_bucket='export-bucket',
-    gcs_temp_path='exports/{{ ds }}/data.csv'
+    gcs_temp_path='exports/{{ ds }}/data.csv',
 )
 ```
 
@@ -185,7 +186,7 @@ export = PostgresToBigQueryOperator(
     destination_project_dataset_table='my-project.staging.test',
     postgres_conn_id='postgres_default',
     gcs_bucket='export-bucket',
-    dry_run=True
+    dry_run=True,
 )
 ```
 
@@ -224,7 +225,7 @@ export = PostgresToBigQueryOperator(
     gcs_bucket='export-bucket',
     partition_by='event_date',
     partition_type='DAY',
-    cluster_fields=['user_id']
+    cluster_fields=['user_id'],
 )
 ```
 
@@ -239,7 +240,7 @@ export = PostgresToBigQueryOperator(
     destination_project_dataset_table='my-project.staging.large',
     postgres_conn_id='postgres_default',
     gcs_bucket='export-bucket',
-    pandas_chunksize=100000
+    pandas_chunksize=100000,
 )
 ```
 

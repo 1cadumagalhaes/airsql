@@ -13,7 +13,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='staging.users',
     postgres_conn_id='postgres_default',
     gcp_conn_id='google_cloud_default',
-    gcs_bucket='temp-export-bucket'
+    gcs_bucket='temp-export-bucket',
 )
 ```
 
@@ -33,6 +33,7 @@ transfer = BigQueryToPostgresOperator(
 | `check_source_exists` | `bool` | No | Validate source exists (default: True) |
 | `auto_detect_json_columns` | `bool` | No | Auto-detect JSON columns (default: True) |
 | `postgres_type_overrides` | `dict[str, str]` | No | Per-column PostgreSQL type hints used when creating destination tables |
+| `batch_size` | `int` | No | Rows read and loaded per batch by the delegated GCS import (default: 50000) |
 | `cleanup_temp_files` | `bool` | No | Clean up GCS temp files (default: True) |
 | `dry_run` | `bool` | No | Simulate without writing (default: False) |
 
@@ -46,7 +47,7 @@ transfer = BigQueryToPostgresOperator(
     source_project_dataset_table='my-project.analytics.users',
     destination_table='warehouse.users',
     postgres_conn_id='postgres_default',
-    gcs_bucket='temp-bucket'
+    gcs_bucket='temp-bucket',
 )
 ```
 
@@ -60,7 +61,7 @@ transfer = BigQueryToPostgresOperator(
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
     conflict_columns=['id'],
-    replace=False
+    replace=False,
 )
 ```
 
@@ -73,7 +74,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='staging.daily_events',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    replace=True
+    replace=True,
 )
 ```
 
@@ -86,7 +87,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='warehouse.table',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    export_format='csv'
+    export_format='csv',
 )
 ```
 
@@ -99,7 +100,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='staging.new_table',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    create_if_empty=True
+    create_if_empty=True,
 )
 ```
 
@@ -132,7 +133,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='warehouse.table',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    gcs_temp_path='custom/path/data.parquet'
+    gcs_temp_path='custom/path/data.parquet',
 )
 ```
 
@@ -145,7 +146,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='warehouse.table',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    check_source_exists=False
+    check_source_exists=False,
 )
 ```
 
@@ -158,7 +159,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='warehouse.large_table',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    dry_run=True
+    dry_run=True,
 )
 ```
 
@@ -182,7 +183,7 @@ transfer = BigQueryToPostgresOperator(
     destination_table='warehouse.events',
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
-    auto_detect_json_columns=True
+    auto_detect_json_columns=True,
 )
 ```
 
@@ -198,6 +199,6 @@ transfer = BigQueryToPostgresOperator(
     postgres_conn_id='postgres_default',
     gcs_bucket='temp-bucket',
     conflict_columns=['sku'],
-    replace=False
+    replace=False,
 )
 ```

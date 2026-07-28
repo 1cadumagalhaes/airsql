@@ -2,8 +2,10 @@ import fnmatch
 import hashlib
 import importlib
 import json
+import tempfile
 import time
 from io import BytesIO, StringIO
+from itertools import chain
 from typing import Any, Optional
 
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
@@ -103,6 +105,7 @@ class GCSToPostgresOperator(BaseOperator):
         postgres_type_overrides: Optional[dict] = None,
         audit_cols_to_exclude=None,
         dry_run: bool = False,
+        batch_size: Optional[int] = 50000,
         *args,
         **kwargs,
     ):
@@ -121,6 +124,9 @@ class GCSToPostgresOperator(BaseOperator):
         self.source_schema = source_schema
         self.postgres_type_overrides = postgres_type_overrides or {}
         self._skip_execution = dry_run
+        if batch_size is not None and batch_size < 1:
+            raise ValueError('batch_size must be greater than zero')
+        self.batch_size = batch_size
         self.audit_cols_to_exclude = audit_cols_to_exclude or {
             'criado_em',
             'atualizado_em',
@@ -129,7 +135,7 @@ class GCSToPostgresOperator(BaseOperator):
         }
 
     @staticmethod
-    def _dataframe_to_tuples(df):
+    def _iter_dataframe_tuples(df):
         """Convert DataFrame to tuples with proper type conversion for PostgreSQL.
 
         Handles both PyArrow-backed and standard pandas DataFrames efficiently.
@@ -156,10 +162,13 @@ class GCSToPostgresOperator(BaseOperator):
                 return bool(val)
             return val
 
-        return [
-            tuple(convert_value(v) for v in row)
-            for row in df.itertuples(index=False, name=None)
-        ]
+        for row in df.itertuples(index=False, name=None):
+            yield tuple(convert_value(v) for v in row)
+
+    @staticmethod
+    def _dataframe_to_tuples(df):
+        """Return converted rows as a list for compatibility with callers."""
+        return list(GCSToPostgresOperator._iter_dataframe_tuples(df))
 
     @staticmethod
     def _convert_json_columns_to_strings(df, json_columns=None):
@@ -391,6 +400,15 @@ class GCSToPostgresOperator(BaseOperator):
 
         file_format = self._detect_file_format(self.object_name)
         object_names = self._resolve_object_names(gcs_hook)
+        if self.batch_size:
+            return self._execute_batched(
+                context,
+                gcs_hook,
+                pg_hook,
+                object_names,
+                file_format,
+                start_time,
+            )
         df = self._read_dataframe_from_gcs_objects(gcs_hook, object_names, file_format)
 
         if '.' in self.target_table_name:
@@ -561,6 +579,378 @@ class GCSToPostgresOperator(BaseOperator):
 
         self.log.info(summary.to_log_summary())
 
+    def _iter_dataframes_from_gcs_objects(
+        self, gcs_hook, object_names: list[str], file_format: str
+    ):
+        """Yield bounded DataFrames from GCS objects without retaining objects."""
+        import pandas as pd  # noqa: PLC0415
+
+        for object_name in object_names:
+            suffix = f'.{file_format}'
+            with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+                downloaded = gcs_hook.download(
+                    bucket_name=self.bucket_name,
+                    object_name=object_name,
+                    filename=tmp.name,
+                )
+                if isinstance(downloaded, bytes):
+                    tmp.write(downloaded)
+                    tmp.flush()
+                if file_format == 'parquet':
+                    import pyarrow.parquet as pq  # noqa: PLC0415
+
+                    parquet_file = pq.ParquetFile(tmp.name)
+                    for record_batch in parquet_file.iter_batches(
+                        batch_size=self.batch_size
+                    ):
+                        yield record_batch.to_pandas()
+                elif file_format == 'csv':
+                    yield from pd.read_csv(
+                        tmp.name,
+                        chunksize=self.batch_size,
+                        dtype_backend='pyarrow',
+                    )
+                elif file_format == 'jsonl':
+                    yield from pd.read_json(
+                        tmp.name,
+                        lines=True,
+                        chunksize=self.batch_size,
+                        dtype_backend='pyarrow',
+                    )
+                else:
+                    # Preserve Avro support until a streaming Avro reader is added.
+                    with open(tmp.name, 'rb') as file_obj:
+                        yield self._read_dataframe_from_bytes(
+                            file_obj.read(), file_format
+                        )
+
+    def _execute_batched(
+        self,
+        context,
+        gcs_hook,
+        pg_hook,
+        object_names: list[str],
+        file_format: str,
+        start_time: float,
+    ):
+        """Load append/replace data one bounded batch at a time."""
+        import pandas as pd  # noqa: PLC0415
+
+        if '.' in self.target_table_name:
+            schema, table_name_simple = self.target_table_name.split('.', 1)
+        else:
+            schema, table_name_simple = 'public', self.target_table_name
+        table_name_full = f'{schema}.{table_name_simple}'
+        table_exists = self._table_exists(pg_hook, schema, table_name_simple)
+        batches = self._iter_dataframes_from_gcs_objects(
+            gcs_hook, object_names, file_format
+        )
+        first_batch = None
+        empty_batch = None
+        for candidate in batches:
+            if candidate.empty:
+                empty_batch = candidate
+                continue
+            first_batch = candidate
+            break
+        if first_batch is None:
+            if (
+                empty_batch is not None
+                and self.create_if_empty
+                and not table_exists
+                and not self._skip_execution
+            ):
+                self._create_empty_table_from_schema(
+                    pg_hook, schema, table_name_simple, empty_batch
+                )
+            self.log.info('Source file is empty. No data to load.')
+            return table_name_full
+
+        if not table_exists:
+            if not self.create_if_missing:
+                raise ValueError(
+                    f'Table {table_name_full} does not exist. '
+                    'Either create the table first or set create_if_missing=True.'
+                )
+            if self._skip_execution:
+                table_exists = True
+            else:
+                if self.partition_column:
+                    self._create_partitioned_parent_table(
+                        pg_hook, schema, table_name_simple, first_batch
+                    )
+                else:
+                    self._create_table_from_dataframe(
+                        pg_hook, schema, table_name_simple, first_batch
+                    )
+                table_exists = True
+
+        column_records = pg_hook.get_records(
+            """
+            SELECT column_name, data_type FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+            ORDER BY ordinal_position;
+            """,
+            parameters=(schema, table_name_simple),
+        )
+        if not column_records:
+            raise ValueError(
+                f'Could not retrieve column information for {table_name_full}.'
+            )
+        model_columns = [record[0] for record in column_records]
+        column_types = {record[0]: record[1] for record in column_records}
+        common_columns = [col for col in first_batch.columns if col in model_columns]
+        json_columns = self._detect_json_columns(pg_hook, schema, table_name_simple)
+
+        conn = None
+        cursor = None
+        total_rows = 0
+        validation_errors = []
+        validation_warnings = []
+        upsert_temp_table = None
+        source_order_column = '__airsql_source_order'
+        partition_temp_table = None
+        try:
+            if not self._skip_execution:
+                conn = pg_hook.get_conn()
+                cursor = conn.cursor()
+                sql_mod = _get_sql_module(conn)
+                if self.conflict_columns:
+                    if source_order_column in model_columns:
+                        raise ValueError(
+                            f'Target table cannot contain reserved column {source_order_column}'
+                        )
+                    missing_conflict_columns = [
+                        col
+                        for col in self.conflict_columns
+                        if col not in common_columns
+                    ]
+                    if missing_conflict_columns:
+                        raise ValueError(
+                            'Conflict columns not found in source data: '
+                            f'{missing_conflict_columns}'
+                        )
+                    upsert_temp_table = self._build_upsert_temp_table_name(
+                        table_name_simple
+                    )
+                    temp_identifier = sql_mod.Identifier(upsert_temp_table)
+                    target_identifier = sql_mod.Identifier(schema, table_name_simple)
+                    cursor.execute(
+                        sql_mod.SQL(
+                            'CREATE TEMP TABLE {temp} (LIKE {target} INCLUDING DEFAULTS) '
+                            'ON COMMIT DROP'
+                        ).format(temp=temp_identifier, target=target_identifier)
+                    )
+                    cursor.execute(
+                        sql_mod.SQL(
+                            'ALTER TABLE {temp} ADD COLUMN {order_col} BIGINT'
+                        ).format(
+                            temp=temp_identifier,
+                            order_col=sql_mod.Identifier(source_order_column),
+                        )
+                    )
+                elif self.partition_column:
+                    partition_temp_table = self._build_partition_temp_table_name(
+                        table_name_simple, 'staging', 'staging'
+                    )
+                    temp_identifier = sql_mod.Identifier(partition_temp_table)
+                    target_identifier = sql_mod.Identifier(schema, table_name_simple)
+                    cursor.execute(
+                        sql_mod.SQL(
+                            'CREATE TEMP TABLE {temp} (LIKE {target} INCLUDING DEFAULTS '
+                            'INCLUDING CONSTRAINTS) ON COMMIT DROP'
+                        ).format(temp=temp_identifier, target=target_identifier)
+                    )
+                elif self.replace:
+                    table_identifier = sql_mod.Identifier(schema, table_name_simple)
+                    cursor.execute(
+                        sql_mod
+                        .SQL('TRUNCATE TABLE {table}')
+                        .format(table=table_identifier)
+                        .as_string(cursor)
+                    )
+
+            for batch in chain((first_batch,), batches):
+                if batch.empty:
+                    continue
+                missing_columns = [
+                    column for column in common_columns if column not in batch.columns
+                ]
+                if missing_columns:
+                    raise ValueError(
+                        'Source schema changed between batches. Columns missing '
+                        f'from a later batch: {missing_columns}'
+                    )
+                late_columns = [
+                    column
+                    for column in batch.columns
+                    if column in model_columns and column not in common_columns
+                ]
+                if late_columns:
+                    raise ValueError(
+                        'Source schema changed between batches. Columns found only '
+                        f'in a later batch: {late_columns}'
+                    )
+                filtered = batch[common_columns].where(
+                    pd.notna(batch[common_columns]), None
+                )
+                filtered = self._coerce_column_types(filtered, column_types)
+                if json_columns and file_format == 'jsonl':
+                    filtered = self._fix_json_quoting(filtered, json_columns)
+                validation = DataValidator.validate_columns(
+                    filtered, expected_columns=common_columns
+                )
+                validation_errors.extend(validation.errors)
+                validation_warnings.extend(validation.warnings)
+                total_rows += len(filtered)
+                if not self._skip_execution:
+                    filtered = self._convert_json_columns_to_strings(filtered)
+                    insert_columns = list(filtered.columns)
+                    if self.conflict_columns:
+                        filtered[source_order_column] = range(
+                            total_rows - len(filtered), total_rows
+                        )
+                        insert_columns.append(source_order_column)
+                        filtered = filtered[insert_columns]
+                    self._insert_dataframe_rows(
+                        cursor,
+                        conn,
+                        sql_mod,
+                        None
+                        if (self.conflict_columns or self.partition_column)
+                        else schema,
+                        (
+                            upsert_temp_table
+                            if self.conflict_columns
+                            else (
+                                partition_temp_table
+                                if self.partition_column
+                                else table_name_simple
+                            )
+                        ),
+                        filtered,
+                        [sql_mod.Identifier(col) for col in filtered.columns]
+                        if (self.conflict_columns or self.partition_column)
+                        else None,
+                        sql_mod.Identifier(
+                            upsert_temp_table
+                            if self.conflict_columns
+                            else partition_temp_table
+                        )
+                        if (self.conflict_columns or self.partition_column)
+                        else None,
+                    )
+
+            if not self._skip_execution:
+                if self.partition_column:
+                    self._partition_exchange_from_staging(
+                        cursor,
+                        sql_mod,
+                        schema,
+                        table_name_simple,
+                        partition_temp_table,
+                        common_columns,
+                    )
+                elif self.conflict_columns:
+                    temp_identifier = sql_mod.Identifier(upsert_temp_table)
+                    target_identifier = sql_mod.Identifier(schema, table_name_simple)
+                    insert_columns = [
+                        col for col in model_columns if col in common_columns
+                    ]
+                    conflict_identifiers = [
+                        sql_mod.Identifier(col) for col in self.conflict_columns
+                    ]
+                    update_columns = [
+                        col
+                        for col in insert_columns
+                        if col not in self.conflict_columns
+                        and col.lower()
+                        not in {
+                            'criado_em',
+                            'atualizado_em',
+                            'created_at',
+                            'updated_at',
+                        }
+                    ]
+                    if update_columns:
+                        update_sql = sql_mod.SQL(
+                            'UPDATE SET {sets} WHERE ({target}) IS DISTINCT FROM ({excluded})'
+                        ).format(
+                            sets=sql_mod.SQL(', ').join(
+                                sql_mod.SQL('{col} = EXCLUDED.{col}').format(
+                                    col=sql_mod.Identifier(col)
+                                )
+                                for col in update_columns
+                            ),
+                            target=sql_mod.SQL(', ').join(
+                                sql_mod.SQL('target.{col}').format(
+                                    col=sql_mod.Identifier(col)
+                                )
+                                for col in update_columns
+                            ),
+                            excluded=sql_mod.SQL(', ').join(
+                                sql_mod.SQL('EXCLUDED.{col}').format(
+                                    col=sql_mod.Identifier(col)
+                                )
+                                for col in update_columns
+                            ),
+                        )
+                    else:
+                        update_sql = sql_mod.SQL('NOTHING')
+                    cursor.execute(
+                        sql_mod.SQL(
+                            'INSERT INTO {target} AS target ({columns}) '
+                            'SELECT {columns} FROM (SELECT DISTINCT ON ({conflicts}) '
+                            '{columns}, {order_col} FROM {temp} '
+                            'ORDER BY {conflicts}, {order_col} DESC) AS source '
+                            'ON CONFLICT ({conflicts}) DO {update}'
+                        ).format(
+                            target=target_identifier,
+                            columns=sql_mod.SQL(', ').join(
+                                sql_mod.Identifier(col) for col in insert_columns
+                            ),
+                            conflicts=sql_mod.SQL(', ').join(conflict_identifiers),
+                            order_col=sql_mod.Identifier(source_order_column),
+                            temp=temp_identifier,
+                            update=update_sql,
+                        )
+                    )
+                conn.commit()
+        except Exception:
+            if conn is not None:
+                conn.rollback()
+            raise
+        finally:
+            if cursor is not None:
+                cursor.close()
+            if conn is not None:
+                conn.close()
+
+        operation_type = (
+            'partition_exchange'
+            if self.partition_column
+            else (
+                'replace'
+                if self.replace
+                else ('upsert' if self.conflict_columns else 'append')
+            )
+        )
+        summary = OperationSummary(
+            operation_type=operation_type,
+            rows_extracted=total_rows,
+            rows_loaded=total_rows if not self._skip_execution else 0,
+            duration_seconds=time.time() - start_time,
+            file_size_mb=self._get_total_file_size_mb(gcs_hook, object_names),
+            format_used=file_format,
+            validation_errors=validation_errors,
+            validation_warnings=validation_warnings,
+            dry_run=self._skip_execution,
+        )
+        self.log.info(summary.to_log_summary())
+        if not self._skip_execution:
+            self._grant_table_privileges(pg_hook, schema, table_name_simple)
+        return table_name_full
+
     def _truncate_and_insert_data(
         self, pg_hook, schema, table_name_simple, df_filtered
     ):
@@ -627,7 +1017,7 @@ class GCSToPostgresOperator(BaseOperator):
             else sql_mod.Identifier(table_name_simple)
         )
 
-        data_tuples = self._dataframe_to_tuples(df_filtered)
+        data_tuples = self._iter_dataframe_tuples(df_filtered)
 
         if not is_psycopg2:
             copy_sql = sql_mod.SQL('COPY {table} ({columns}) FROM STDIN').format(
@@ -833,12 +1223,13 @@ class GCSToPostgresOperator(BaseOperator):
         return pd.read_csv(StringIO(file_data.decode('utf-8')), dtype_backend='pyarrow')
 
     def _get_total_file_size_mb(self, gcs_hook, object_names: list[str]) -> float:
-        total_size_bytes = sum(
-            len(
-                gcs_hook.download(bucket_name=self.bucket_name, object_name=object_name)
+        total_size_bytes = 0
+        for object_name in object_names:
+            object_size = gcs_hook.get_size(
+                bucket_name=self.bucket_name, object_name=object_name
             )
-            for object_name in object_names
-        )
+            if isinstance(object_size, (int, float)):
+                total_size_bytes += object_size
         return total_size_bytes / (1024 * 1024)
 
     @staticmethod
@@ -955,6 +1346,123 @@ class GCSToPostgresOperator(BaseOperator):
         if self.grant_table_privileges:
             self._grant_table_privileges(pg_hook, schema, table_name)
 
+    def _partition_exchange_from_staging(
+        self,
+        cursor,
+        sql_mod,
+        schema: str,
+        table_name: str,
+        staging_table: str,
+        columns: list[str],
+    ) -> None:
+        """Publish partition batches staged in one temporary table."""
+        if self.partition_column not in columns:
+            raise ValueError(
+                f"Partition column '{self.partition_column}' not found in data."
+            )
+
+        parent_identifier = sql_mod.Identifier(schema, table_name)
+        staging_identifier = sql_mod.Identifier(staging_table)
+        partition_identifier = sql_mod.Identifier(self.partition_column)
+        cursor.execute(
+            sql_mod.SQL(
+                'SELECT DISTINCT {partition} FROM {staging} '
+                'WHERE {partition} IS NOT NULL'
+            ).format(
+                partition=partition_identifier,
+                staging=staging_identifier,
+            )
+        )
+        partition_values = [row[0] for row in cursor.fetchall()]
+        if not partition_values:
+            raise ValueError(
+                f"No values found in partition column '{self.partition_column}'"
+            )
+
+        partition_pg_type = self._get_partition_pg_type()
+        insert_columns = sql_mod.SQL(', ').join(
+            sql_mod.Identifier(column) for column in columns
+        )
+
+        for partition_value in partition_values:
+            value_string = self._stringify_partition_bound(partition_value)
+            safe_value = (
+                value_string.replace('-', '').replace(' ', '_').replace(':', '')
+            )
+            partition_name = f'{table_name}_{safe_value}'
+            temp_name = self._build_partition_temp_table_name(
+                table_name, safe_value, value_string
+            )
+            temp_identifier = sql_mod.Identifier(temp_name)
+            partition_identifier = sql_mod.Identifier(partition_name)
+
+            cursor.execute(
+                sql_mod.SQL(
+                    'CREATE TEMP TABLE {temp} (LIKE {parent} INCLUDING DEFAULTS '
+                    'INCLUDING CONSTRAINTS) ON COMMIT DROP'
+                ).format(temp=temp_identifier, parent=parent_identifier)
+            )
+            cursor.execute(
+                sql_mod.SQL(
+                    'INSERT INTO {temp} ({columns}) SELECT {columns} FROM {staging} '
+                    'WHERE {partition} = %s'
+                ).format(
+                    temp=temp_identifier,
+                    columns=insert_columns,
+                    staging=staging_identifier,
+                    partition=sql_mod.Identifier(self.partition_column),
+                ),
+                (partition_value,),
+            )
+
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = %s AND n.nspname = %s
+                )
+                """,
+                (partition_name, schema or 'public'),
+            )
+            if cursor.fetchone()[0]:
+                cursor.execute(
+                    sql_mod.SQL(
+                        'ALTER TABLE {parent} DETACH PARTITION {partition}'
+                    ).format(
+                        parent=parent_identifier,
+                        partition=partition_identifier,
+                    )
+                )
+                cursor.execute(
+                    sql_mod.SQL('DROP TABLE IF EXISTS {partition}').format(
+                        partition=partition_identifier
+                    )
+                )
+
+            partition_start = self._quote_sql_literal(value_string)
+            partition_end = self._quote_sql_literal(
+                self._get_next_partition_value(partition_value)
+            )
+            cursor.execute(
+                sql_mod.SQL(
+                    'CREATE TABLE {partition} PARTITION OF {parent} '
+                    'FOR VALUES FROM ({start}::{type}) TO ({end}::{type})'
+                ).format(
+                    partition=partition_identifier,
+                    parent=parent_identifier,
+                    start=sql_mod.SQL(partition_start),
+                    end=sql_mod.SQL(partition_end),
+                    type=sql_mod.SQL(partition_pg_type),
+                )
+            )
+            cursor.execute(
+                sql_mod.SQL('INSERT INTO {partition} SELECT * FROM {temp}').format(
+                    partition=partition_identifier,
+                    temp=temp_identifier,
+                )
+            )
+
     def _partition_exchange(self, pg_hook, schema: str, table_name: str, df) -> None:
         """Perform partition exchange for incremental data loads.
 
@@ -995,7 +1503,6 @@ class GCSToPostgresOperator(BaseOperator):
                 partition_value_str.replace('-', '').replace(' ', '_').replace(':', '')
             )
             partition_name = f'{table_name}_{partition_value_safe}'
-            full_parent_table = f'{schema}.{table_name}' if schema else table_name
             full_partition = f'{schema}.{partition_name}' if schema else partition_name
 
             df_partition = df[df[self.partition_column] == partition_value]
@@ -1013,12 +1520,21 @@ class GCSToPostgresOperator(BaseOperator):
             sql_mod = _get_sql_module(conn)
 
             try:
-                cursor.execute(f'DROP TABLE IF EXISTS {temp_table_name}')
+                temp_identifier = sql_mod.Identifier(temp_table_name)
+                parent_identifier = sql_mod.Identifier(schema, table_name)
+                partition_identifier = sql_mod.Identifier(partition_name)
+                cursor.execute(
+                    sql_mod.SQL('DROP TABLE IF EXISTS {table}').format(
+                        table=temp_identifier
+                    )
+                )
                 conn.commit()
 
                 cursor.execute(
-                    f'CREATE TEMP TABLE {temp_table_name} '
-                    f'(LIKE {full_parent_table} INCLUDING DEFAULTS INCLUDING CONSTRAINTS)'
+                    sql_mod.SQL(
+                        'CREATE TEMP TABLE {temp} '
+                        '(LIKE {parent} INCLUDING DEFAULTS INCLUDING CONSTRAINTS)'
+                    ).format(temp=temp_identifier, parent=parent_identifier)
                 )
                 conn.commit()
 
@@ -1045,10 +1561,19 @@ class GCSToPostgresOperator(BaseOperator):
                 if partition_exists:
                     self.log.info(f'Detaching existing partition {full_partition}')
                     cursor.execute(
-                        f'ALTER TABLE {full_parent_table} DETACH PARTITION {full_partition}'
+                        sql_mod.SQL(
+                            'ALTER TABLE {parent} DETACH PARTITION {partition}'
+                        ).format(
+                            parent=parent_identifier,
+                            partition=partition_identifier,
+                        )
                     )
                     self.log.info(f'Dropping old partition {full_partition}')
-                    cursor.execute(f'DROP TABLE IF EXISTS {full_partition}')
+                    cursor.execute(
+                        sql_mod.SQL('DROP TABLE IF EXISTS {partition}').format(
+                            partition=partition_identifier
+                        )
+                    )
                     conn.commit()
 
                 partition_start = self._stringify_partition_bound(partition_value)
@@ -1059,17 +1584,26 @@ class GCSToPostgresOperator(BaseOperator):
                 partition_end_sql = self._quote_sql_literal(partition_end)
 
                 cursor.execute(
-                    f"""
-                    CREATE TABLE {full_partition} PARTITION OF {full_parent_table}
-                    FOR VALUES FROM ({partition_start_sql}::{partition_pg_type})
-                    TO ({partition_end_sql}::{partition_pg_type})
-                    """
+                    sql_mod.SQL(
+                        'CREATE TABLE {partition} PARTITION OF {parent} '
+                        'FOR VALUES FROM ({start}::{type}) '
+                        'TO ({end}::{type})'
+                    ).format(
+                        partition=partition_identifier,
+                        parent=parent_identifier,
+                        start=sql_mod.SQL(partition_start_sql),
+                        end=sql_mod.SQL(partition_end_sql),
+                        type=sql_mod.SQL(partition_pg_type),
+                    )
                 )
                 conn.commit()
 
                 self.log.info(f'Inserting data into partition {full_partition}')
                 cursor.execute(
-                    f'INSERT INTO {full_partition} SELECT * FROM {temp_table_name}'
+                    sql_mod.SQL('INSERT INTO {partition} SELECT * FROM {temp}').format(
+                        partition=partition_identifier,
+                        temp=temp_identifier,
+                    )
                 )
 
                 conn.commit()
@@ -1082,7 +1616,11 @@ class GCSToPostgresOperator(BaseOperator):
                 )
                 raise
             finally:
-                cursor.execute(f'DROP TABLE IF EXISTS {temp_table_name}')
+                cursor.execute(
+                    sql_mod.SQL('DROP TABLE IF EXISTS {table}').format(
+                        table=temp_identifier
+                    )
+                )
                 conn.commit()
             cursor.close()
             conn.close()

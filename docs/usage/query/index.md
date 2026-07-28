@@ -51,15 +51,18 @@ Most query operations share these common parameters:
 ```python
 from airsql import sql, Table
 
-@sql.dataframe(source_conn="postgres_conn")
+
+@sql.dataframe(source_conn='postgres_conn')
 def get_active_users():
-    return "SELECT * FROM users WHERE active = true"
+    return 'SELECT * FROM users WHERE active = true'
 
-@sql.query(output_table=Table("postgres_conn", "reports.daily_summary"))
+
+@sql.query(output_table=Table('postgres_conn', 'reports.daily_summary'))
 def create_report():
-    return "SELECT DATE(created_at) as date, COUNT(*) as total FROM orders GROUP BY 1"
+    return 'SELECT DATE(created_at) as date, COUNT(*) as total FROM orders GROUP BY 1'
 
-@sql.replace(output_table=Table("postgres_conn", "cache.user_cache"))
+
+@sql.replace(output_table=Table('postgres_conn', 'cache.user_cache'))
 def refresh_cache():
     return "SELECT * FROM users WHERE last_login > CURRENT_DATE - INTERVAL '30 days'"
 ```
@@ -71,22 +74,22 @@ from airsql.operators import SQLQueryOperator, SQLDataFrameOperator, SQLReplaceO
 from airsql import Table
 
 df_task = SQLDataFrameOperator(
-    task_id="get_active_users",
-    sql="SELECT * FROM users WHERE active = true",
-    source_conn="postgres_conn"
+    task_id='get_active_users',
+    sql='SELECT * FROM users WHERE active = true',
+    source_conn='postgres_conn',
 )
 
 query_task = SQLQueryOperator(
-    task_id="create_report",
-    sql="SELECT DATE(created_at) as date, COUNT(*) as total FROM orders GROUP BY 1",
-    output_table=Table("postgres_conn", "reports.daily_summary"),
-    source_conn="postgres_conn"
+    task_id='create_report',
+    sql='SELECT DATE(created_at) as date, COUNT(*) as total FROM orders GROUP BY 1',
+    output_table=Table('postgres_conn', 'reports.daily_summary'),
+    source_conn='postgres_conn',
 )
 
 replace_task = SQLReplaceOperator(
-    task_id="refresh_cache",
+    task_id='refresh_cache',
     sql="SELECT * FROM users WHERE last_login > CURRENT_DATE - INTERVAL '30 days'",
-    output_table=Table("postgres_conn", "cache.user_cache"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'cache.user_cache'),
+    source_conn='postgres_conn',
 )
 ```

@@ -57,9 +57,11 @@ uv add airsql
 ```python
 from airsql import sql
 
-@sql.dataframe(source_conn="postgres_conn")
+
+@sql.dataframe(source_conn='postgres_conn')
 def get_active_users():
-    return "SELECT * FROM users WHERE active = true"
+    return 'SELECT * FROM users WHERE active = true'
+
 
 # Use in DAG
 df_task = get_active_users()
@@ -70,7 +72,8 @@ df_task = get_active_users()
 ```python
 from airsql import sql, Table
 
-@sql.query(output_table=Table("postgres_conn", "reports.daily_summary"))
+
+@sql.query(output_table=Table('postgres_conn', 'reports.daily_summary'))
 def create_daily_report():
     return """
     SELECT DATE(created_at) as date, COUNT(*) as total
@@ -78,18 +81,20 @@ def create_daily_report():
     GROUP BY DATE(created_at)
     """
 
+
 report_task = create_daily_report()
 ```
 
 ### Replace Table Content
 
 ```python
-@sql.replace(output_table=Table("postgres_conn", "cache.user_cache"))
+@sql.replace(output_table=Table('postgres_conn', 'cache.user_cache'))
 def refresh_cache():
     return """
     SELECT * FROM users 
     WHERE last_login > CURRENT_DATE - INTERVAL '30 days'
     """
+
 
 cache_task = refresh_cache()
 ```
@@ -98,12 +103,13 @@ cache_task = refresh_cache()
 
 ```python
 @sql.merge(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"],
-    update_columns=["name", "email", "updated_at"]
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['id'],
+    update_columns=['name', 'email', 'updated_at'],
 )
 def sync_users():
-    return "SELECT id, name, email, updated_at FROM staging_users"
+    return 'SELECT id, name, email, updated_at FROM staging_users'
+
 
 sync_task = sync_users()
 ```
@@ -111,11 +117,12 @@ sync_task = sync_users()
 ### Data Quality Checks
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_no_nulls():
-    return "SELECT COUNT(*) = 0 FROM users WHERE id IS NULL"
+    return 'SELECT COUNT(*) = 0 FROM users WHERE id IS NULL'
 
-@sql.check(conn_id="bigquery_conn")
+
+@sql.check(conn_id='bigquery_conn')
 def test_row_count():
     return "SELECT COUNT(*) > 0 FROM daily_data WHERE date = '{{ ds }}'"
 ```
@@ -131,7 +138,8 @@ Execute SQL and return a pandas DataFrame:
 ```python
 from airsql import sql
 
-@sql.dataframe(source_conn="postgres_conn")
+
+@sql.dataframe(source_conn='postgres_conn')
 def get_user_stats():
     return """
     SELECT COUNT(*) as total_users, 
@@ -146,8 +154,8 @@ Execute SQL and write results to a table:
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "analytics.user_stats"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'analytics.user_stats'),
+    source_conn='postgres_conn',
 )
 def calculate_stats():
     return """
@@ -162,7 +170,7 @@ def calculate_stats():
 Append query results to an existing table:
 
 ```python
-@sql.append(output_table=Table("postgres_conn", "archive.events"))
+@sql.append(output_table=Table('postgres_conn', 'archive.events'))
 def archive_daily():
     return """
     SELECT * FROM events 
@@ -175,9 +183,9 @@ def archive_daily():
 Replace entire table content:
 
 ```python
-@sql.replace(output_table=Table("postgres_conn", "reports.current_state"))
+@sql.replace(output_table=Table('postgres_conn', 'reports.current_state'))
 def refresh_state():
-    return "SELECT * FROM current_state_view"
+    return 'SELECT * FROM current_state_view'
 ```
 
 ### Truncate and Reload
@@ -185,7 +193,7 @@ def refresh_state():
 Truncate table (preserving structure) and insert new data:
 
 ```python
-@sql.truncate(output_table=Table("postgres_conn", "staging.daily_import"))
+@sql.truncate(output_table=Table('postgres_conn', 'staging.daily_import'))
 def reload_daily():
     return """
     SELECT * FROM source_data 
@@ -199,12 +207,12 @@ Merge with conflict resolution:
 
 ```python
 @sql.merge(
-    output_table=Table("postgres_conn", "public.products"),
-    conflict_columns=["sku"],
-    update_columns=["name", "price", "quantity"]
+    output_table=Table('postgres_conn', 'public.products'),
+    conflict_columns=['sku'],
+    update_columns=['name', 'price', 'quantity'],
 )
 def sync_products():
-    return "SELECT sku, name, price, quantity FROM product_updates"
+    return 'SELECT sku, name, price, quantity FROM product_updates'
 ```
 
 ### Load DataFrame Directly
@@ -214,15 +222,12 @@ Load a pandas DataFrame into a table:
 ```python
 import pandas as pd
 
+
 @sql.load_dataframe(
-    output_table=Table("postgres_conn", "staging.metrics"),
-    if_exists="replace"
+    output_table=Table('postgres_conn', 'staging.metrics'), if_exists='replace'
 )
 def generate_metrics():
-    return pd.DataFrame({
-        'metric': ['users', 'orders'],
-        'value': [1000, 500]
-    })
+    return pd.DataFrame({'metric': ['users', 'orders'], 'value': [1000, 500]})
 ```
 
 ### Merge DataFrame
@@ -231,14 +236,13 @@ Merge DataFrame with upsert logic:
 
 ```python
 @sql.merge_dataframe(
-    output_table=Table("postgres_conn", "public.inventory"),
-    conflict_columns=["sku"]
+    output_table=Table('postgres_conn', 'public.inventory'), conflict_columns=['sku']
 )
 def update_inventory():
     return pd.DataFrame({
         'sku': ['SKU001', 'SKU002'],
         'quantity': [100, 50],
-        'price': [19.99, 29.99]
+        'price': [19.99, 29.99],
     })
 ```
 
@@ -248,9 +252,9 @@ Extract via SQL and load into a table in one task:
 
 ```python
 @sql.extract_and_load(
-    output_table=Table("postgres_conn", "warehouse.events"),
-    source_conn="bigquery_conn",
-    if_exists="replace"
+    output_table=Table('postgres_conn', 'warehouse.events'),
+    source_conn='bigquery_conn',
+    if_exists='replace',
 )
 def sync_events():
     return """
@@ -265,12 +269,12 @@ Extract via SQL and merge with upsert:
 
 ```python
 @sql.extract_and_merge(
-    output_table=Table("postgres_conn", "public.users"),
-    conflict_columns=["id"],
-    source_conn="bigquery_conn"
+    output_table=Table('postgres_conn', 'public.users'),
+    conflict_columns=['id'],
+    source_conn='bigquery_conn',
 )
 def sync_users():
-    return "SELECT id, name, email FROM staging_users"
+    return 'SELECT id, name, email FROM staging_users'
 ```
 
 ## Table References
@@ -283,32 +287,33 @@ The `Table` class encapsulates database table references with connection informa
 from airsql import Table
 
 # Simple reference
-users = Table(conn_id="postgres_conn", table_name="public.users")
+users = Table(conn_id='postgres_conn', table_name='public.users')
 
 # With dataset (BigQuery style)
-events = Table(conn_id="bigquery_conn", table_name="analytics.events")
+events = Table(conn_id='bigquery_conn', table_name='analytics.events')
 
 # Full reference
 full_table = Table(
-    conn_id="bigquery_conn",
-    table_name="analytics.events",
-    project="my-project",
-    location="US"
+    conn_id='bigquery_conn',
+    table_name='analytics.events',
+    project='my-project',
+    location='US',
 )
 ```
 
 ### Table Parameters
 
 ```python
-@sql.query(output_table=Table("postgres_conn", "reports.{{ region }}_summary"))
+@sql.query(output_table=Table('postgres_conn', 'reports.{{ region }}_summary'))
 def regional_summary(region):
     return f"""
     SELECT * FROM orders 
     WHERE region = '{region}'
     """
 
-us_task = regional_summary(region="us")
-eu_task = regional_summary(region="eu")
+
+us_task = regional_summary(region='us')
+eu_task = regional_summary(region='eu')
 ```
 
 ### Cross-Database Queries
@@ -325,9 +330,10 @@ def analyze_cross_source(users_table, events_table):
     GROUP BY u.id, u.name
     """
 
+
 analysis = analyze_cross_source(
-    users_table=Table("postgres_conn", "public.users"),
-    events_table=Table("bigquery_conn", "analytics.events")
+    users_table=Table('postgres_conn', 'public.users'),
+    events_table=Table('bigquery_conn', 'analytics.events'),
 )
 ```
 
@@ -339,8 +345,8 @@ Store SQL in separate files with Jinja templating:
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.complex_report"),
-    sql_file="sql/complex_report.sql"
+    output_table=Table('postgres_conn', 'reports.complex_report'),
+    sql_file='sql/complex_report.sql',
 )
 def generate_report(start_date, end_date):
     pass
@@ -350,9 +356,9 @@ def generate_report(start_date, end_date):
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.filtered"),
-    region="us-west",
-    status="active"
+    output_table=Table('postgres_conn', 'reports.filtered'),
+    region='us-west',
+    status='active',
 )
 def filtered_data(date_filter):
     return """
@@ -377,31 +383,31 @@ from airsql.operators import (
 from airsql import Table
 
 df_task = SQLDataFrameOperator(
-    task_id="get_users",
-    sql="SELECT * FROM users WHERE active = true",
-    source_conn="postgres_conn"
+    task_id='get_users',
+    sql='SELECT * FROM users WHERE active = true',
+    source_conn='postgres_conn',
 )
 
 query_task = SQLQueryOperator(
-    task_id="create_report",
-    sql="SELECT * FROM orders GROUP BY date",
-    output_table=Table("postgres_conn", "reports.daily"),
-    source_conn="postgres_conn"
+    task_id='create_report',
+    sql='SELECT * FROM orders GROUP BY date',
+    output_table=Table('postgres_conn', 'reports.daily'),
+    source_conn='postgres_conn',
 )
 
 replace_task = SQLReplaceOperator(
-    task_id="refresh_cache",
-    sql="SELECT * FROM active_users",
-    output_table=Table("postgres_conn", "cache.users"),
-    source_conn="postgres_conn"
+    task_id='refresh_cache',
+    sql='SELECT * FROM active_users',
+    output_table=Table('postgres_conn', 'cache.users'),
+    source_conn='postgres_conn',
 )
 
 merge_task = SQLMergeOperator(
-    task_id="upsert_products",
-    sql="SELECT * FROM product_updates",
-    output_table=Table("postgres_conn", "public.products"),
-    conflict_columns=["sku"],
-    source_conn="postgres_conn"
+    task_id='upsert_products',
+    sql='SELECT * FROM product_updates',
+    output_table=Table('postgres_conn', 'public.products'),
+    conflict_columns=['sku'],
+    source_conn='postgres_conn',
 )
 ```
 
@@ -419,7 +425,7 @@ wait_for_data = PostgresSqlSensor(
     sql="SELECT COUNT(*) > 0 FROM daily_data WHERE date = '{{ ds }}'",
     conn_id='postgres_default',
     retries=3,
-    poke_interval=60
+    poke_interval=60,
 )
 ```
 
@@ -430,9 +436,9 @@ from airsql.sensors import BigQuerySqlSensor
 
 wait_for_etl = BigQuerySqlSensor(
     task_id='wait_for_etl',
-    sql="SELECT COUNT(*) > 0 FROM staging WHERE processed = true",
+    sql='SELECT COUNT(*) > 0 FROM staging WHERE processed = true',
     conn_id='bigquery_default',
-    location='us-central1'
+    location='us-central1',
 )
 ```
 
@@ -450,7 +456,7 @@ transfer = BigQueryToPostgresOperator(
     source_project_dataset_table='my-project.analytics.users',
     destination_table='warehouse.users',
     postgres_conn_id='postgres_default',
-    gcs_bucket='temp-bucket'
+    gcs_bucket='temp-bucket',
 )
 ```
 
@@ -464,7 +470,7 @@ export = PostgresToBigQueryOperator(
     sql='SELECT * FROM orders WHERE date = {{ ds }}',
     destination_project_dataset_table='my-project.staging.orders',
     postgres_conn_id='postgres_default',
-    gcs_bucket='temp-bucket'
+    gcs_bucket='temp-bucket',
 )
 ```
 
@@ -478,7 +484,7 @@ export = PostgresToGCSOperator(
     sql='SELECT * FROM large_table',
     postgres_conn_id='postgres_default',
     bucket='data-lake',
-    filename='exports/{{ ds }}/data.csv'
+    filename='exports/{{ ds }}/data.csv',
 )
 ```
 
@@ -492,7 +498,7 @@ import_task = GCSToPostgresOperator(
     gcs_bucket='data-bucket',
     object_name='imports/users.jsonl',
     target_table_name='staging.users',
-    postgres_conn_id='postgres_default'
+    postgres_conn_id='postgres_default',
 )
 ```
 
@@ -505,20 +511,17 @@ from airsql.sensors import PostgresSqlSensor
 from airsql.transfers import PostgresToBigQueryOperator
 from datetime import datetime
 
-@dag(
-    schedule="@daily",
-    start_date=datetime(2024, 1, 1),
-    catchup=False
-)
+
+@dag(schedule='@daily', start_date=datetime(2024, 1, 1), catchup=False)
 def analytics_pipeline():
 
     wait_for_source = PostgresSqlSensor(
         task_id='wait_for_source',
         sql="SELECT COUNT(*) > 0 FROM raw_events WHERE date = '{{ ds }}'",
-        conn_id='postgres_default'
+        conn_id='postgres_default',
     )
 
-    @sql.query(output_table=Table("postgres_conn", "staging.daily_events"))
+    @sql.query(output_table=Table('postgres_conn', 'staging.daily_events'))
     def stage_events():
         return """
         SELECT * FROM raw_events 
@@ -526,16 +529,16 @@ def analytics_pipeline():
         """
 
     @sql.merge(
-        output_table=Table("postgres_conn", "warehouse.events"),
-        conflict_columns=["event_id"],
-        update_columns=["status", "updated_at"]
+        output_table=Table('postgres_conn', 'warehouse.events'),
+        conflict_columns=['event_id'],
+        update_columns=['status', 'updated_at'],
     )
     def merge_events():
         return """
         SELECT * FROM staging.daily_events
         """
 
-    @sql.check(conn_id="postgres_conn")
+    @sql.check(conn_id='postgres_conn')
     def validate_events():
         return """
         SELECT COUNT(*) > 0 
@@ -548,10 +551,17 @@ def analytics_pipeline():
         sql="SELECT * FROM warehouse.events WHERE date = '{{ ds }}'",
         destination_project_dataset_table='my-project.analytics.events',
         postgres_conn_id='postgres_default',
-        gcs_bucket='temp-bucket'
+        gcs_bucket='temp-bucket',
     )
 
-    wait_for_source >> stage_events() >> merge_events() >> validate_events() >> export_to_bq
+    (
+        wait_for_source
+        >> stage_events()
+        >> merge_events()
+        >> validate_events()
+        >> export_to_bq
+    )
+
 
 analytics_pipeline()
 ```
@@ -564,30 +574,30 @@ AirSQL decorators work seamlessly with Airflow's TaskFlow API:
 from airflow.decorators import dag, task
 from airsql import sql, Table
 
-@dag(schedule="@daily")
+
+@dag(schedule='@daily')
 def my_dag():
 
-    @sql.dataframe(source_conn="postgres_conn")
+    @sql.dataframe(source_conn='postgres_conn')
     def extract_users():
-        return "SELECT * FROM users WHERE active = true"
+        return 'SELECT * FROM users WHERE active = true'
 
     @task
     def process_users(df):
-        return df.groupby("region").size().to_dict()
+        return df.groupby('region').size().to_dict()
 
     @sql.load_dataframe(
-        output_table=Table("postgres_conn", "reports.user_counts"),
-        if_exists="replace"
+        output_table=Table('postgres_conn', 'reports.user_counts'), if_exists='replace'
     )
     def save_counts(counts):
         import pandas as pd
-        return pd.DataFrame([
-            {"region": k, "count": v} for k, v in counts.items()
-        ])
+
+        return pd.DataFrame([{'region': k, 'count': v} for k, v in counts.items()])
 
     users_df = extract_users()
     counts = process_users(users_df)
     save_counts(counts)
+
 
 my_dag()
 ```
@@ -598,12 +608,12 @@ Test operations without writing data:
 
 ```python
 @sql.query(
-    output_table=Table("postgres_conn", "reports.test"),
-    source_conn="postgres_conn",
-    dry_run=True
+    output_table=Table('postgres_conn', 'reports.test'),
+    source_conn='postgres_conn',
+    dry_run=True,
 )
 def test_query():
-    return "SELECT * FROM large_table LIMIT 1000000"
+    return 'SELECT * FROM large_table LIMIT 1000000'
 ```
 
 ## Documentation

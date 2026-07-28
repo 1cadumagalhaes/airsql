@@ -13,7 +13,7 @@ export = PostgresToGCSOperator(
     postgres_conn_id='postgres_default',
     bucket='backup-bucket',
     filename='exports/{{ ds_nodash }}/report.csv',
-    gcp_conn_id='google_cloud_default'
+    gcp_conn_id='google_cloud_default',
 )
 ```
 
@@ -28,7 +28,8 @@ export = PostgresToGCSOperator(
 | `gcp_conn_id` | `str` | No | GCP connection ID |
 | `export_format` | `str` | No | csv, jsonl, parquet (default: csv) |
 | `schema_filename` | `str` | No | Path for BigQuery schema JSON |
-| `pandas_chunksize` | `int` | No | Rows per chunk for large exports |
+| `pandas_chunksize` | `int` | No | Rows per chunk for large exports; omitted preserves the existing full-query path |
+| `shard_size_mb` | `float` | No | Maximum uploaded shard size when chunked extraction is enabled |
 | `use_copy` | `bool` | No | Use PostgreSQL COPY for streaming |
 | `use_temp_file` | `bool` | No | Use temp file instead of streaming |
 | `csv_kwargs` | `dict` | No | Additional pandas CSV options |
@@ -47,7 +48,7 @@ export = PostgresToGCSOperator(
     postgres_conn_id='postgres_default',
     bucket='data-lake',
     filename='exports/users/{{ ds }}/users.csv',
-    export_format='csv'
+    export_format='csv',
 )
 ```
 
@@ -60,7 +61,7 @@ export = PostgresToGCSOperator(
     postgres_conn_id='postgres_default',
     bucket='data-lake',
     filename='events/{{ ds }}.jsonl',
-    export_format='jsonl'
+    export_format='jsonl',
 )
 ```
 
@@ -74,7 +75,7 @@ export = PostgresToGCSOperator(
     bucket='data-lake',
     filename='huge_table/export.parquet',
     export_format='parquet',
-    use_copy=True
+    use_copy=True,
 )
 ```
 
@@ -88,7 +89,7 @@ export = PostgresToGCSOperator(
     bucket='data-lake',
     filename='metrics/{{ ds }}.jsonl',
     export_format='jsonl',
-    schema_filename='schemas/metrics.json'
+    schema_filename='schemas/metrics.json',
 )
 ```
 
@@ -102,7 +103,7 @@ export = PostgresToGCSOperator(
     bucket='data-lake',
     filename='large_table/data.parquet',
     export_format='parquet',
-    pandas_chunksize=50000
+    pandas_chunksize=50000,
 )
 ```
 
@@ -116,7 +117,7 @@ export = PostgresToGCSOperator(
     bucket='exports',
     filename='products.csv',
     export_format='csv',
-    csv_kwargs={'sep': '|', 'encoding': 'utf-8'}
+    csv_kwargs={'sep': '|', 'encoding': 'utf-8'},
 )
 ```
 
@@ -129,7 +130,7 @@ export = PostgresToGCSOperator(
     postgres_conn_id='postgres_default',
     bucket='test-bucket',
     filename='test/data.csv',
-    dry_run=True
+    dry_run=True,
 )
 ```
 
@@ -162,7 +163,7 @@ export = PostgresToGCSOperator(
     bucket='data-lake',
     filename='events.jsonl',
     export_format='csv',  # Will auto-switch to JSONL
-    auto_switch_format=True
+    auto_switch_format=True,
 )
 ```
 
@@ -178,7 +179,7 @@ export = PostgresToGCSOperator(
     """,
     postgres_conn_id='postgres_default',
     bucket='daily-exports',
-    filename='orders/{{ ds }}.csv'
+    filename='orders/{{ ds }}.csv',
 )
 ```
 
@@ -194,6 +195,6 @@ export = PostgresToGCSOperator(
     postgres_conn_id='postgres_default',
     bucket='archive-bucket',
     filename='historical/{{ ds_nodash }}.parquet',
-    export_format='parquet'
+    export_format='parquet',
 )
 ```

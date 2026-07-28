@@ -11,7 +11,7 @@ wait_for_data = BigQuerySqlSensor(
     task_id='wait_for_user_data',
     sql="SELECT COUNT(*) FROM analytics.user_events WHERE dt = '{{ ds }}'",
     conn_id='bigquery_default',
-    location='us-central1'
+    location='us-central1',
 )
 ```
 
@@ -40,7 +40,7 @@ wait_for_rows = BigQuerySqlSensor(
         WHERE date = '{{ ds }}'
     """,
     conn_id='bigquery_default',
-    location='US'
+    location='US',
 )
 ```
 
@@ -58,7 +58,7 @@ wait_for_etl = BigQuerySqlSensor(
     """,
     conn_id='bigquery_default',
     retries=5,
-    poke_interval=300
+    poke_interval=300,
 )
 ```
 
@@ -72,7 +72,7 @@ wait_for_partition = BigQuerySqlSensor(
         FROM `project.dataset.events`
         WHERE DATE(event_time) = '{{ ds }}'
     """,
-    conn_id='bigquery_default'
+    conn_id='bigquery_default',
 )
 ```
 
@@ -88,7 +88,7 @@ validate_data = BigQuerySqlSensor(
         FROM `project.analytics.users`
         WHERE date = '{{ ds }}'
     """,
-    conn_id='bigquery_default'
+    conn_id='bigquery_default',
 )
 ```
 
@@ -104,7 +104,7 @@ validate_completeness = BigQuerySqlSensor(
             (SELECT COUNT(*) FROM source_b WHERE date = '{{ ds }}')
     """,
     conn_id='bigquery_default',
-    location='us-central1'
+    location='us-central1',
 )
 ```
 
@@ -121,7 +121,7 @@ sensor = BigQuerySqlSensor(
     retries=5,
     poke_interval=180,
     timeout=5400,
-    retry_delay=timedelta(minutes=3)
+    retry_delay=timedelta(minutes=3),
 )
 ```
 
@@ -132,7 +132,8 @@ from airflow.decorators import dag
 from airsql.sensors import BigQuerySqlSensor
 from airsql.transfers import BigQueryToPostgresOperator
 
-@dag(schedule="@daily")
+
+@dag(schedule='@daily')
 def bq_to_pg_pipeline():
 
     wait_for_source = BigQuerySqlSensor(
@@ -142,7 +143,7 @@ def bq_to_pg_pipeline():
             FROM `project.staging.data_{{ ds_nodash }}`
         """,
         conn_id='bigquery_default',
-        location='US'
+        location='US',
     )
 
     transfer = BigQueryToPostgresOperator(
@@ -150,10 +151,11 @@ def bq_to_pg_pipeline():
         source_project_dataset_table='project.staging.data_{{ ds_nodash }}',
         destination_table='warehouse.daily_data',
         postgres_conn_id='postgres_default',
-        gcs_bucket='temp-bucket'
+        gcs_bucket='temp-bucket',
     )
 
     wait_for_source >> transfer
+
 
 bq_to_pg_pipeline()
 ```
@@ -164,24 +166,24 @@ bq_to_pg_pipeline()
 # US multi-region
 sensor_us = BigQuerySqlSensor(
     task_id='check_us',
-    sql="SELECT COUNT(*) > 0 FROM `project.us_dataset.table`",
+    sql='SELECT COUNT(*) > 0 FROM `project.us_dataset.table`',
     conn_id='bigquery_default',
-    location='US'
+    location='US',
 )
 
 # EU region
 sensor_eu = BigQuerySqlSensor(
     task_id='check_eu',
-    sql="SELECT COUNT(*) > 0 FROM `project.eu_dataset.table`",
+    sql='SELECT COUNT(*) > 0 FROM `project.eu_dataset.table`',
     conn_id='bigquery_default',
-    location='EU'
+    location='EU',
 )
 
 # Specific region
 sensor_regional = BigQuerySqlSensor(
     task_id='check_regional',
-    sql="SELECT COUNT(*) > 0 FROM `project.dataset.table`",
+    sql='SELECT COUNT(*) > 0 FROM `project.dataset.table`',
     conn_id='bigquery_default',
-    location='us-central1'
+    location='us-central1',
 )
 ```

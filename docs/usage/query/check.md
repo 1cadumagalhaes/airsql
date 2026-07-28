@@ -8,10 +8,10 @@ The `@sql.check` decorator and `SQLCheckOperator` execute SQL data quality check
 from airsql.operators import SQLCheckOperator
 
 check_task = SQLCheckOperator(
-    task_id="check_no_nulls",
-    sql="SELECT COUNT(*) = 0 FROM users WHERE id IS NULL",
-    source_conn="postgres_conn",
-    retries=2
+    task_id='check_no_nulls',
+    sql='SELECT COUNT(*) = 0 FROM users WHERE id IS NULL',
+    source_conn='postgres_conn',
+    retries=2,
 )
 
 check_task.execute(context)
@@ -32,9 +32,11 @@ check_task.execute(context)
 ```python
 from airsql import sql
 
-@sql.check(conn_id="postgres_conn")
+
+@sql.check(conn_id='postgres_conn')
 def check_no_nulls():
-    return "SELECT COUNT(*) = 0 FROM users WHERE id IS NULL"
+    return 'SELECT COUNT(*) = 0 FROM users WHERE id IS NULL'
+
 
 check_task = check_no_nulls()
 ```
@@ -53,15 +55,15 @@ check_task = check_no_nulls()
 ### Null Check
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_no_null_ids():
-    return "SELECT COUNT(*) = 0 FROM users WHERE id IS NULL"
+    return 'SELECT COUNT(*) = 0 FROM users WHERE id IS NULL'
 ```
 
 ### Row Count Check
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_has_data():
     return "SELECT COUNT(*) > 0 FROM daily_data WHERE date = '{{ ds }}'"
 ```
@@ -69,7 +71,7 @@ def test_has_data():
 ### Data Range Check
 
 ```python
-@sql.check(conn_id="bigquery_conn")
+@sql.check(conn_id='bigquery_conn')
 def test_value_range():
     return """
     SELECT COUNT(*) = 0 
@@ -81,7 +83,7 @@ def test_value_range():
 ### Uniqueness Check
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_unique_emails():
     return """
     SELECT COUNT(*) = COUNT(DISTINCT email)
@@ -92,7 +94,7 @@ def test_unique_emails():
 ### Referential Integrity Check
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_foreign_keys():
     return """
     SELECT COUNT(*) = 0
@@ -105,7 +107,7 @@ def test_foreign_keys():
 ### Multiple Checks
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_data_quality():
     return """
     SELECT 
@@ -120,7 +122,8 @@ def test_data_quality():
 ```python
 from airsql import sql, Table
 
-@sql.check(conn_id="postgres_conn")
+
+@sql.check(conn_id='postgres_conn')
 def test_table_quality(table):
     return f"""
     SELECT COUNT(*) = 0 
@@ -128,16 +131,14 @@ def test_table_quality(table):
     WHERE id IS NULL OR created_at IS NULL
     """
 
-check = test_table_quality(table=Table("postgres_conn", "public.orders"))
+
+check = test_table_quality(table=Table('postgres_conn', 'public.orders'))
 ```
 
 ### Using SQL Files
 
 ```python
-@sql.check(
-    conn_id="postgres_conn",
-    sql_file="checks/daily_quality_check.sql"
-)
+@sql.check(conn_id='postgres_conn', sql_file='checks/daily_quality_check.sql')
 def daily_quality_check(date_param):
     pass
 ```
@@ -145,10 +146,7 @@ def daily_quality_check(date_param):
 ### With Template Variables
 
 ```python
-@sql.check(
-    conn_id="bigquery_conn",
-    min_rows=1000
-)
+@sql.check(conn_id='bigquery_conn', min_rows=1000)
 def test_min_rows(date_filter):
     return """
     SELECT COUNT(*) >= {{ min_rows }}
@@ -164,23 +162,23 @@ AirSQL checks are compatible with dbt test patterns:
 ### Not Null Test
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_id_not_null(table):
-    return "SELECT COUNT(*) = 0 FROM {{ table }} WHERE id IS NULL"
+    return 'SELECT COUNT(*) = 0 FROM {{ table }} WHERE id IS NULL'
 ```
 
 ### Unique Test
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_id_unique(table):
-    return "SELECT COUNT(*) = COUNT(DISTINCT id) FROM {{ table }}"
+    return 'SELECT COUNT(*) = COUNT(DISTINCT id) FROM {{ table }}'
 ```
 
 ### Accepted Values Test
 
 ```python
-@sql.check(conn_id="postgres_conn")
+@sql.check(conn_id='postgres_conn')
 def test_status_values(table):
     return """
     SELECT COUNT(*) = 0 
@@ -206,9 +204,11 @@ Add retry logic for transient issues:
 ```python
 from datetime import timedelta
 
-@sql.check(conn_id="postgres_conn")
+
+@sql.check(conn_id='postgres_conn')
 def check_with_retry():
-    return "SELECT COUNT(*) > 0 FROM late_arriving_data"
+    return 'SELECT COUNT(*) > 0 FROM late_arriving_data'
+
 
 check_task = check_with_retry()
 check_task.retries = 3

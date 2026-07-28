@@ -33,9 +33,11 @@ Here's a simple example to get you started:
 ```python
 from airsql import sql, Table
 
-@sql.dataframe(source_conn="postgres_conn")
+
+@sql.dataframe(source_conn='postgres_conn')
 def get_active_users():
-    return "SELECT * FROM users WHERE active = true"
+    return 'SELECT * FROM users WHERE active = true'
+
 
 # Use in DAG
 df_task = get_active_users()
@@ -49,15 +51,15 @@ Tables are the primary way to reference database tables in AirSQL:
 from airsql import Table
 
 # Simple table reference
-table = Table(conn_id="postgres_conn", table_name="users.active_users")
+table = Table(conn_id='postgres_conn', table_name='users.active_users')
 
 # BigQuery table with advanced options
 bq_table = Table(
-    conn_id="bigquery_conn",
-    table_name="analytics.user_events",
-    project="my-project",
-    partition_by="event_date",
-    cluster_by=["user_id", "event_type"]
+    conn_id='bigquery_conn',
+    table_name='analytics.user_events',
+    project='my-project',
+    partition_by='event_date',
+    cluster_by=['user_id', 'event_type'],
 )
 ```
 

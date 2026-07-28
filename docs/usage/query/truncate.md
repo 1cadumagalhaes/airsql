@@ -9,10 +9,10 @@ from airsql.operators import SQLTruncateOperator
 from airsql import Table
 
 truncate_task = SQLTruncateOperator(
-    task_id="reload_daily_data",
+    task_id='reload_daily_data',
     sql="SELECT * FROM source WHERE date = '{{ ds }}'",
-    output_table=Table("postgres_conn", "warehouse.daily_events"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'warehouse.daily_events'),
+    source_conn='postgres_conn',
 )
 
 truncate_task.execute(context)
@@ -34,12 +34,14 @@ truncate_task.execute(context)
 ```python
 from airsql import sql, Table
 
+
 @sql.truncate(
-    output_table=Table("postgres_conn", "warehouse.daily_events"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'warehouse.daily_events'),
+    source_conn='postgres_conn',
 )
 def reload_daily_data():
     return "SELECT * FROM source WHERE date = '{{ ds }}'"
+
 
 reload_task = reload_daily_data()
 ```
@@ -49,9 +51,7 @@ reload_task = reload_daily_data()
 ### Daily Partition Reload
 
 ```python
-@sql.truncate(
-    output_table=Table("postgres_conn", "analytics.today_events")
-)
+@sql.truncate(output_table=Table('postgres_conn', 'analytics.today_events'))
 def reload_todays_events():
     return """
     SELECT * FROM raw_events 
@@ -63,8 +63,8 @@ def reload_todays_events():
 
 ```python
 @sql.truncate(
-    output_table=Table("postgres_conn", "staging.import_data"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'staging.import_data'),
+    source_conn='postgres_conn',
 )
 def refresh_staging():
     return """
@@ -77,8 +77,8 @@ def refresh_staging():
 
 ```python
 @sql.truncate(
-    output_table=Table("postgres_conn", "cache.user_summary"),
-    source_conn="postgres_conn"
+    output_table=Table('postgres_conn', 'cache.user_summary'),
+    source_conn='postgres_conn',
 )
 def rebuild_cache():
     return """
@@ -95,15 +95,12 @@ def rebuild_cache():
 ### Cross-Database Reload
 
 ```python
-@sql.truncate(
-    output_table=Table("postgres_conn", "reporting.bq_sync")
-)
+@sql.truncate(output_table=Table('postgres_conn', 'reporting.bq_sync'))
 def sync_from_bigquery(source):
-    return "SELECT * FROM {{ source }}"
+    return 'SELECT * FROM {{ source }}'
 
-task = sync_from_bigquery(
-    source=Table("bigquery_conn", "analytics.user_metrics")
-)
+
+task = sync_from_bigquery(source=Table('bigquery_conn', 'analytics.user_metrics'))
 ```
 
 ## Truncate vs Replace
@@ -131,11 +128,12 @@ Use `truncate` when:
 When using tables marked as `temporary=True`, they are automatically dropped after the operation:
 
 ```python
-temp_table = Table("postgres_conn", "temp.staging", temporary=True)
+temp_table = Table('postgres_conn', 'temp.staging', temporary=True)
+
 
 @sql.truncate(output_table=temp_table)
 def stage_data():
-    return "SELECT * FROM raw_data"
+    return 'SELECT * FROM raw_data'
 ```
 
 ## Related Operations
