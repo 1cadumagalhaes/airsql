@@ -938,13 +938,14 @@ class PostgresToGCSOperator(BaseOperator):
                     f'{filename_root}-{shard_number:05d}{filename_extension}'
                 )
                 shard_bytes = os.path.getsize(tmp_path)
-                gcs_hook.upload(
-                    bucket_name=self.bucket,
-                    object_name=shard_name,
-                    filename=tmp_path,
-                    mime_type=mime_type,
-                )
-                uploaded_shards.append(shard_name)
+                if not self._skip_execution:
+                    gcs_hook.upload(
+                        bucket_name=self.bucket,
+                        object_name=shard_name,
+                        filename=tmp_path,
+                        mime_type=mime_type,
+                    )
+                    uploaded_shards.append(shard_name)
                 uploaded_bytes += shard_bytes
                 os.remove(tmp_path)
                 shard_number += 1
