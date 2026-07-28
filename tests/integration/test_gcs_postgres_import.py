@@ -1457,7 +1457,9 @@ class TestBatchPartitionExchange:
 
 
 class TestBatchSchemaValidation:
-    def test_rejects_columns_missing_from_later_batch(self, pg_engine, real_postgres_hook):
+    def test_rejects_columns_missing_from_later_batch(
+        self, pg_engine, real_postgres_hook
+    ):
         from unittest.mock import MagicMock, patch
 
         from airsql.transfers.gcs_postgres import GCSToPostgresOperator
