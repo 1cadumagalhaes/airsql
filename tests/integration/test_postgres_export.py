@@ -1182,6 +1182,7 @@ class TestSchemaExport:
 
 class TestPostgresExportShards:
     def test_chunked_export_rotates_gcs_shards(self, pg_engine):
+        import re
         from unittest.mock import MagicMock, patch
 
         from airsql.transfers.postgres_gcs import PostgresToGCSOperator
@@ -1218,10 +1219,11 @@ class TestPostgresExportShards:
             mock_pg.return_value.get_records.return_value = []
             operator.execute({})
 
-        assert list(uploads) == [
-            'exports/data-00000.csv',
-            'exports/data-00001.csv',
-            'exports/data-00002.csv',
-        ]
-        assert operator.filename == 'exports/data-*.csv'
+        assert len(uploads) == 3
+        assert all(
+            re.fullmatch(r'exports/data-[0-9a-f]{12}-0000[0-2]\.csv', name)
+            for name in uploads
+        )
+        assert re.fullmatch(r'exports/data-[0-9a-f]{12}-\*\.csv', operator.filename)
+        mock_gcs.list.assert_not_called()
         assert sum(payload.count(b'\n') for payload in uploads.values()) == 6

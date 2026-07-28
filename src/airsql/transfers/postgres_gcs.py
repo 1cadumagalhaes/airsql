@@ -2,11 +2,11 @@
 Operator to transfer data from PostgreSQL to Google Cloud Storage.
 """
 
-import fnmatch
 import json
 import os
 import tempfile
 import time
+import uuid
 import warnings
 from io import BytesIO, StringIO
 from typing import Dict, List, Optional, Sequence
@@ -934,7 +934,6 @@ class PostgresToGCSOperator(BaseOperator):
                 else None
             )
             filename_root, filename_extension = os.path.splitext(self.filename)
-            shard_pattern = f'{filename_root}-*{filename_extension}'
             uploaded_shard_names = []
 
             def delete_shards(shard_names):
@@ -945,21 +944,12 @@ class PostgresToGCSOperator(BaseOperator):
                             object_name=shard_name,
                         )
                     except Exception as exc:  # noqa: BLE001
-                        self.log.warning(
+                        self.log.error(
                             'Failed to clean up GCS shard %s: %s', shard_name, exc
                         )
 
-            if shard_size_bytes is not None and not self._skip_execution:
-                prefix = f'{filename_root}-'
-                existing_shards = [
-                    name
-                    for name in gcs_hook.list(
-                        bucket_name=self.bucket,
-                        prefix=prefix,
-                    )
-                    if fnmatch.fnmatch(name, shard_pattern)
-                ]
-                delete_shards(existing_shards)
+            if shard_size_bytes is not None:
+                filename_root = f'{filename_root}-{uuid.uuid4().hex[:12]}'
 
             def upload_completed_shard():
                 nonlocal \
