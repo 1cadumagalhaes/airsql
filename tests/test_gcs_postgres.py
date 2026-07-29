@@ -891,3 +891,22 @@ class TestBoundedGCSLoading:
             operator._get_total_file_size_mb(FakeGCSHook(), ['one.csv', 'two.csv'])
             == 0.0029296875
         )
+
+
+class TestPartitionBounds:
+    def test_date_string_advances_one_day(self):
+        assert (
+            GCSToPostgresOperator._get_next_partition_value('2024-01-01', 'DATE')
+            == '2024-01-02'
+        )
+
+    def test_timestamp_string_advances_one_day(self):
+        assert (
+            GCSToPostgresOperator._get_next_partition_value(
+                '2024-01-01 12:30:00', 'TIMESTAMP'
+            )
+            == '2024-01-02 12:30:00'
+        )
+
+    def test_untyped_string_retains_sentinel_behavior(self):
+        assert GCSToPostgresOperator._get_next_partition_value('alpha') == 'alpha\xff'

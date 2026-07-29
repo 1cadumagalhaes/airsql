@@ -1394,7 +1394,7 @@ class GCSToPostgresOperator(BaseOperator):
                 table_name, safe_value, value_string
             )
             temp_identifier = sql_mod.Identifier(temp_name)
-            partition_identifier = sql_mod.Identifier(partition_name)
+            partition_identifier = sql_mod.Identifier(schema, partition_name)
 
             cursor.execute(
                 sql_mod.SQL(
@@ -1415,34 +1415,29 @@ class GCSToPostgresOperator(BaseOperator):
                 (partition_value,),
             )
 
-            cursor.execute(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM pg_class c
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE c.relname = %s AND n.nspname = %s
-                )
-                """,
-                (partition_name, schema or 'public'),
+            existing_partition = self._find_attached_partition(
+                cursor, schema, table_name, partition_name
             )
-            if cursor.fetchone()[0]:
+            if existing_partition is not None:
+                existing_schema, existing_name = existing_partition
+                existing_identifier = sql_mod.Identifier(existing_schema, existing_name)
                 cursor.execute(
                     sql_mod.SQL(
                         'ALTER TABLE {parent} DETACH PARTITION {partition}'
                     ).format(
                         parent=parent_identifier,
-                        partition=partition_identifier,
+                        partition=existing_identifier,
                     )
                 )
                 cursor.execute(
                     sql_mod.SQL('DROP TABLE IF EXISTS {partition}').format(
-                        partition=partition_identifier
+                        partition=existing_identifier
                     )
                 )
 
             partition_start = self._quote_sql_literal(value_string)
             partition_end = self._quote_sql_literal(
-                self._get_next_partition_value(partition_value)
+                self._get_next_partition_value(partition_value, partition_pg_type)
             )
             cursor.execute(
                 sql_mod.SQL(
@@ -1522,7 +1517,7 @@ class GCSToPostgresOperator(BaseOperator):
             try:
                 temp_identifier = sql_mod.Identifier(temp_table_name)
                 parent_identifier = sql_mod.Identifier(schema, table_name)
-                partition_identifier = sql_mod.Identifier(partition_name)
+                partition_identifier = sql_mod.Identifier(schema, partition_name)
                 cursor.execute(
                     sql_mod.SQL('DROP TABLE IF EXISTS {table}').format(
                         table=temp_identifier
@@ -1548,37 +1543,34 @@ class GCSToPostgresOperator(BaseOperator):
                     df_to_insert,
                 )
 
-                cursor.execute(
-                    """
-                    SELECT 1 FROM pg_class c
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE c.relname = %s AND n.nspname = %s
-                    """,
-                    (partition_name, schema or 'public'),
+                existing_partition = self._find_attached_partition(
+                    cursor, schema, table_name, partition_name
                 )
-                partition_exists = cursor.fetchone() is not None
-
-                if partition_exists:
+                if existing_partition is not None:
+                    existing_schema, existing_name = existing_partition
+                    existing_identifier = sql_mod.Identifier(
+                        existing_schema, existing_name
+                    )
                     self.log.info(f'Detaching existing partition {full_partition}')
                     cursor.execute(
                         sql_mod.SQL(
                             'ALTER TABLE {parent} DETACH PARTITION {partition}'
                         ).format(
                             parent=parent_identifier,
-                            partition=partition_identifier,
+                            partition=existing_identifier,
                         )
                     )
                     self.log.info(f'Dropping old partition {full_partition}')
                     cursor.execute(
                         sql_mod.SQL('DROP TABLE IF EXISTS {partition}').format(
-                            partition=partition_identifier
+                            partition=existing_identifier
                         )
                     )
                     conn.commit()
 
                 partition_start = self._stringify_partition_bound(partition_value)
                 partition_end = GCSToPostgresOperator._get_next_partition_value(
-                    partition_value
+                    partition_value, partition_pg_type
                 )
                 partition_start_sql = self._quote_sql_literal(partition_start)
                 partition_end_sql = self._quote_sql_literal(partition_end)
@@ -1624,6 +1616,26 @@ class GCSToPostgresOperator(BaseOperator):
                 conn.commit()
             cursor.close()
             conn.close()
+
+    @staticmethod
+    def _find_attached_partition(
+        cursor, schema: str, table_name: str, partition_name: str
+    ):
+        cursor.execute(
+            """
+            SELECT child_ns.nspname, child.relname
+            FROM pg_inherits
+            JOIN pg_class child ON child.oid = inhrelid
+            JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+            JOIN pg_class parent ON parent.oid = inhparent
+            JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+            WHERE parent_ns.nspname = %s
+              AND parent.relname = %s
+              AND child.relname = %s
+            """,
+            (schema, table_name, partition_name),
+        )
+        return cursor.fetchone()
 
     @classmethod
     def _build_upsert_temp_table_name(cls, table_name: str) -> str:
@@ -1683,7 +1695,7 @@ class GCSToPostgresOperator(BaseOperator):
         return "'" + value.replace("'", "''") + "'"
 
     @staticmethod
-    def _get_next_partition_value(value) -> str:
+    def _get_next_partition_value(value, pg_type: str | None = None) -> str:
         """Get the next value for partition boundary (exclusive upper bound).
 
         For DATE: next day
@@ -1696,6 +1708,22 @@ class GCSToPostgresOperator(BaseOperator):
             String representation of the next value
         """
         import datetime  # noqa: PLC0415
+
+        normalized_type = (pg_type or '').upper()
+        if isinstance(value, str) and normalized_type in {
+            'DATE',
+            'TIMESTAMP',
+            'TIMESTAMPTZ',
+        }:
+            try:
+                if normalized_type == 'DATE':
+                    value = datetime.date.fromisoformat(value[:10])
+                else:
+                    value = datetime.datetime.fromisoformat(
+                        value.replace('Z', '+00:00')
+                    )
+            except ValueError:
+                pass
 
         if isinstance(value, (datetime.date, datetime.datetime)):
             if isinstance(value, datetime.datetime):
