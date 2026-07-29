@@ -4,6 +4,41 @@ icon: lucide/list-checks
 
 # Release Notes
 
+## 0.18.1
+
+Released: 2026-07-29
+
+### Highlights
+
+- Keeps PostgreSQL partitions in the configured target schema instead of relying on the connection `search_path`.
+- Repairs partitions previously created in `public` by `0.18.0` during the next replacement.
+- Applies schema-safe partition replacement to both batched and legacy loading paths.
+- Handles string `DATE` and `TIMESTAMP` partition values when calculating exclusive upper bounds.
+
+### Notes
+
+- Partition recovery only detaches and removes a relation proven through `pg_inherits` to belong to the target parent table.
+- Existing unrelated tables with the same name are not removed.
+
+## 0.18.0
+
+Released: 2026-07-29
+
+### Highlights
+
+- Adds bounded-memory loading for BigQuery-to-PostgreSQL transfers with batch readers for Parquet, CSV, and JSONL.
+- Processes GCS objects sequentially and avoids redundant full-object downloads for size reporting.
+- Streams PostgreSQL row conversion instead of materializing a complete tuple list.
+- Adds PostgreSQL staging for cross-batch upserts and partition exchange.
+- Adds chunked PostgreSQL extraction with optional size-limited GCS output shards.
+- Adds batch schema-drift validation and safer temporary-file cleanup.
+
+### Compatibility
+
+- Existing append, replace, retry, and transaction semantics remain unchanged.
+- Upsert and partition operations retain atomic publication through PostgreSQL staging.
+- Non-sharded PostgreSQL-to-GCS exports remain available for compatibility.
+
 ## 0.15.0
 
 Released: 2026-05-27
