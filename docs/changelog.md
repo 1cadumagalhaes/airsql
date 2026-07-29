@@ -39,6 +39,22 @@ Released: 2026-07-29
 - Upsert and partition operations retain atomic publication through PostgreSQL staging.
 - Non-sharded PostgreSQL-to-GCS exports remain available for compatibility.
 
+## 0.17.0
+
+Released: 2026-07-20
+
+### Highlights
+
+- Supports Airflow 3.3 template rendering in AirSQL operators and transfers.
+
+## 0.16.0
+
+Released: 2026-06-25
+
+### Highlights
+
+- Renders AirSQL templates at runtime for more reliable dynamic task configuration.
+
 ## 0.15.0
 
 Released: 2026-05-27
