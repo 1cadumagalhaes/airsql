@@ -1401,8 +1401,9 @@ class TestRoundTrip:
 
 
 class TestBatchPartitionExchange:
+    @pytest.mark.parametrize('batch_size', [2, None])
     def test_partition_exchange_stages_multiple_batches(
-        self, pg_engine, real_postgres_hook
+        self, pg_engine, real_postgres_hook, batch_size
     ):
         from unittest.mock import MagicMock, patch
 
@@ -1413,9 +1414,20 @@ class TestBatchPartitionExchange:
 2024-01-01,Bob
 2024-01-02,Carol
 """
+        with pg_engine.connect() as conn:
+            conn.execute(text('DROP SCHEMA IF EXISTS partitioned_schema CASCADE'))
+            conn.execute(
+                text('DROP TABLE IF EXISTS public.partitioned_import_20240101')
+            )
+            conn.execute(
+                text('DROP TABLE IF EXISTS public.partitioned_import_20240102')
+            )
+            conn.execute(text('CREATE SCHEMA partitioned_schema'))
+            conn.commit()
+
         op = GCSToPostgresOperator(
             task_id='test_partition_batch',
-            target_table_name='partitioned_import',
+            target_table_name='partitioned_schema.partitioned_import',
             bucket_name='test-bucket',
             object_name='data.csv',
             postgres_conn_id='postgres_default',
@@ -1423,7 +1435,7 @@ class TestBatchPartitionExchange:
             create_if_missing=True,
             partition_column='partition_date',
             source_schema={'partition_date': 'DATE'},
-            batch_size=2,
+            batch_size=batch_size,
         )
         mock_gcs = MagicMock()
         mock_gcs.download.return_value = csv_data
@@ -1436,23 +1448,40 @@ class TestBatchPartitionExchange:
             ),
         ):
             op.execute({})
+            op.execute({})
 
         try:
             with pg_engine.connect() as conn:
                 result = conn.execute(
                     text(
-                        'SELECT partition_date, name FROM partitioned_import '
+                        'SELECT partition_date, name FROM partitioned_schema.partitioned_import '
                         'ORDER BY partition_date, name'
                     )
                 ).fetchall()
+                target_partition = conn.execute(
+                    text(
+                        "SELECT to_regclass('partitioned_schema.partitioned_import_20240101')"
+                    )
+                ).scalar()
+                public_partition = conn.execute(
+                    text("SELECT to_regclass('public.partitioned_import_20240101')")
+                ).scalar()
             assert [(str(row[0]), row[1]) for row in result] == [
                 ('2024-01-01', 'Alice'),
                 ('2024-01-01', 'Bob'),
                 ('2024-01-02', 'Carol'),
             ]
+            assert target_partition == 'partitioned_schema.partitioned_import_20240101'
+            assert public_partition is None
         finally:
             with pg_engine.connect() as conn:
-                conn.execute(text('DROP TABLE IF EXISTS partitioned_import CASCADE'))
+                conn.execute(text('DROP SCHEMA IF EXISTS partitioned_schema CASCADE'))
+                conn.execute(
+                    text('DROP TABLE IF EXISTS public.partitioned_import_20240101')
+                )
+                conn.execute(
+                    text('DROP TABLE IF EXISTS public.partitioned_import_20240102')
+                )
                 conn.commit()
 
 

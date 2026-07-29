@@ -1394,7 +1394,7 @@ class GCSToPostgresOperator(BaseOperator):
                 table_name, safe_value, value_string
             )
             temp_identifier = sql_mod.Identifier(temp_name)
-            partition_identifier = sql_mod.Identifier(partition_name)
+            partition_identifier = sql_mod.Identifier(schema, partition_name)
 
             cursor.execute(
                 sql_mod.SQL(
@@ -1442,7 +1442,7 @@ class GCSToPostgresOperator(BaseOperator):
 
             partition_start = self._quote_sql_literal(value_string)
             partition_end = self._quote_sql_literal(
-                self._get_next_partition_value(partition_value)
+                self._get_next_partition_value(partition_value, partition_pg_type)
             )
             cursor.execute(
                 sql_mod.SQL(
@@ -1522,7 +1522,7 @@ class GCSToPostgresOperator(BaseOperator):
             try:
                 temp_identifier = sql_mod.Identifier(temp_table_name)
                 parent_identifier = sql_mod.Identifier(schema, table_name)
-                partition_identifier = sql_mod.Identifier(partition_name)
+                partition_identifier = sql_mod.Identifier(schema, partition_name)
                 cursor.execute(
                     sql_mod.SQL('DROP TABLE IF EXISTS {table}').format(
                         table=temp_identifier
@@ -1578,7 +1578,7 @@ class GCSToPostgresOperator(BaseOperator):
 
                 partition_start = self._stringify_partition_bound(partition_value)
                 partition_end = GCSToPostgresOperator._get_next_partition_value(
-                    partition_value
+                    partition_value, partition_pg_type
                 )
                 partition_start_sql = self._quote_sql_literal(partition_start)
                 partition_end_sql = self._quote_sql_literal(partition_end)
@@ -1683,7 +1683,7 @@ class GCSToPostgresOperator(BaseOperator):
         return "'" + value.replace("'", "''") + "'"
 
     @staticmethod
-    def _get_next_partition_value(value) -> str:
+    def _get_next_partition_value(value, pg_type: str | None = None) -> str:
         """Get the next value for partition boundary (exclusive upper bound).
 
         For DATE: next day
@@ -1696,6 +1696,22 @@ class GCSToPostgresOperator(BaseOperator):
             String representation of the next value
         """
         import datetime  # noqa: PLC0415
+
+        normalized_type = (pg_type or '').upper()
+        if isinstance(value, str) and normalized_type in {
+            'DATE',
+            'TIMESTAMP',
+            'TIMESTAMPTZ',
+        }:
+            try:
+                if normalized_type == 'DATE':
+                    value = datetime.date.fromisoformat(value[:10])
+                else:
+                    value = datetime.datetime.fromisoformat(
+                        value.replace('Z', '+00:00')
+                    )
+            except ValueError:
+                pass
 
         if isinstance(value, (datetime.date, datetime.datetime)):
             if isinstance(value, datetime.datetime):
