@@ -1415,28 +1415,23 @@ class GCSToPostgresOperator(BaseOperator):
                 (partition_value,),
             )
 
-            cursor.execute(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM pg_class c
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE c.relname = %s AND n.nspname = %s
-                )
-                """,
-                (partition_name, schema or 'public'),
+            existing_partition = self._find_attached_partition(
+                cursor, schema, table_name, partition_name
             )
-            if cursor.fetchone()[0]:
+            if existing_partition is not None:
+                existing_schema, existing_name = existing_partition
+                existing_identifier = sql_mod.Identifier(existing_schema, existing_name)
                 cursor.execute(
                     sql_mod.SQL(
                         'ALTER TABLE {parent} DETACH PARTITION {partition}'
                     ).format(
                         parent=parent_identifier,
-                        partition=partition_identifier,
+                        partition=existing_identifier,
                     )
                 )
                 cursor.execute(
                     sql_mod.SQL('DROP TABLE IF EXISTS {partition}').format(
-                        partition=partition_identifier
+                        partition=existing_identifier
                     )
                 )
 
@@ -1548,30 +1543,27 @@ class GCSToPostgresOperator(BaseOperator):
                     df_to_insert,
                 )
 
-                cursor.execute(
-                    """
-                    SELECT 1 FROM pg_class c
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE c.relname = %s AND n.nspname = %s
-                    """,
-                    (partition_name, schema or 'public'),
+                existing_partition = self._find_attached_partition(
+                    cursor, schema, table_name, partition_name
                 )
-                partition_exists = cursor.fetchone() is not None
-
-                if partition_exists:
+                if existing_partition is not None:
+                    existing_schema, existing_name = existing_partition
+                    existing_identifier = sql_mod.Identifier(
+                        existing_schema, existing_name
+                    )
                     self.log.info(f'Detaching existing partition {full_partition}')
                     cursor.execute(
                         sql_mod.SQL(
                             'ALTER TABLE {parent} DETACH PARTITION {partition}'
                         ).format(
                             parent=parent_identifier,
-                            partition=partition_identifier,
+                            partition=existing_identifier,
                         )
                     )
                     self.log.info(f'Dropping old partition {full_partition}')
                     cursor.execute(
                         sql_mod.SQL('DROP TABLE IF EXISTS {partition}').format(
-                            partition=partition_identifier
+                            partition=existing_identifier
                         )
                     )
                     conn.commit()
@@ -1624,6 +1616,26 @@ class GCSToPostgresOperator(BaseOperator):
                 conn.commit()
             cursor.close()
             conn.close()
+
+    @staticmethod
+    def _find_attached_partition(
+        cursor, schema: str, table_name: str, partition_name: str
+    ):
+        cursor.execute(
+            """
+            SELECT child_ns.nspname, child.relname
+            FROM pg_inherits
+            JOIN pg_class child ON child.oid = inhrelid
+            JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+            JOIN pg_class parent ON parent.oid = inhparent
+            JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+            WHERE parent_ns.nspname = %s
+              AND parent.relname = %s
+              AND child.relname = %s
+            """,
+            (schema, table_name, partition_name),
+        )
+        return cursor.fetchone()
 
     @classmethod
     def _build_upsert_temp_table_name(cls, table_name: str) -> str:
