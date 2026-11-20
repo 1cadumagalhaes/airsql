@@ -1,0 +1,556 @@
+/* AirSQL landing — the home page only. Look is recorded in DESIGN.md. */
+
+body:has(.lp) .md-main__inner,
+body:has(.lp) .md-content,
+body:has(.lp) .md-content__inner {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+body:has(.lp) .md-content__inner > .lp {
+  margin: 0;
+}
+
+[data-md-color-scheme="slate"] .lp {
+  /* ember at text size clears 4.5:1 on the dark surface at this value */
+  --lp-ember-text: #f0703f;
+  --lp-band-bg: #0b1116;
+  --lp-band-fg: #eef2f5;
+  --lp-band-dim: rgba(238, 242, 245, 0.72);
+  --lp-band-meta: #7b878f;
+  --lp-band-link: #cfd6db;
+  --lp-band-line: #1b242b;
+  --lp-band-box: rgba(255, 255, 255, 0.14);
+  --lp-band-box-bg: rgba(255, 255, 255, 0.03);
+}
+
+/* Surface tokens come from the docs theme, so the page follows the
+   light/dark palette without a second set of rules. */
+.lp {
+  --lp-ink: var(--md-default-fg-color, #0f1418);
+  /* accent used as a fill / large mark */
+  --lp-ember: #e8582a;
+  --lp-ember-soft: #f0703f;
+  /* accent used as text: darkened to clear 4.5:1 on paper */
+  --lp-ember-text: #c64217;
+  --lp-muted: var(--md-default-fg-color--light, #5b6670);
+  --lp-line: var(--md-default-fg-color--lightest, #e4e6e8);
+  --lp-wash: var(--md-code-bg-color, #f5f5f5);
+  /* band surfaces (hero, closing call to action) */
+  --lp-band-bg: #ffffff;
+  --lp-band-fg: #0f1418;
+  --lp-band-dim: #4a555e;
+  --lp-band-meta: #7b878f;
+  --lp-band-link: #33404a;
+  --lp-band-line: #e4e6e8;
+  --lp-band-box: #e4e6e8;
+  --lp-band-box-bg: #ffffff;
+  --lp-code-bg: #0b1116;
+  --lp-code-fg: #dbe3e9;
+  --lp-code-dim: #7c8b9a;
+  --lp-code-str: #a9c3a0;
+  font-family: var(--md-text-font);
+  color: var(--lp-ink);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.lp h1,
+.lp h2,
+.lp p,
+.lp figure,
+.lp ul {
+  margin: 0;
+}
+
+.lp a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.lp-wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+/* ---------- hero ---------- */
+
+.lp-hero {
+  background: var(--lp-band-bg);
+  color: var(--lp-band-fg);
+  border-bottom: 1px solid var(--lp-band-line);
+  padding: 60px 0 68px;
+}
+
+.lp-hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.02fr);
+  gap: 56px;
+  align-items: center;
+}
+
+/* The mark leads the page: it is the one brand element above the claim. */
+.lp-hero__mark {
+  display: block;
+}
+
+/* One mark per band surface: ink on paper, white on ink. */
+.lp-hero__mark--on-dark {
+  display: none;
+}
+
+[data-md-color-scheme="slate"] .lp-hero__mark--on-light {
+  display: none;
+}
+
+[data-md-color-scheme="slate"] .lp-hero__mark--on-dark {
+  display: block;
+}
+
+.lp-hero__mark {
+  width: 76px;
+  height: 76px;
+  margin-bottom: 28px;
+}
+
+.lp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  font-family: var(--md-code-font);
+  font-size: 0.66rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--lp-band-meta);
+  margin-bottom: 26px !important;
+}
+
+.lp-meta span:first-child {
+  color: var(--lp-ember-soft);
+}
+
+.lp h1 {
+  font-size: clamp(2.1rem, 4.4vw, 3.35rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.04;
+  color: var(--lp-band-fg);
+  text-wrap: balance;
+}
+
+.lp-lead {
+  margin-top: 20px !important;
+  font-size: 1.0625rem;
+  line-height: 1.62;
+  color: var(--lp-band-dim);
+  max-width: 40ch;
+}
+
+.lp-cmd {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 30px;
+  padding: 9px 14px;
+  border: 1px solid var(--lp-band-box);
+  border-radius: 7px;
+  font-family: var(--md-code-font);
+  font-size: 0.86rem;
+  color: var(--lp-band-fg);
+  background: var(--lp-band-box-bg);
+}
+
+.lp-cmd__sign {
+  color: var(--lp-ember-soft);
+}
+
+.lp-cmd code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.lp-hero__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin-top: 26px !important;
+  font-size: 0.9rem;
+}
+
+.lp-hero__links a {
+  color: var(--lp-band-link);
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--lp-band-line);
+}
+
+.lp-hero__links a:hover {
+  color: var(--lp-band-fg);
+  border-bottom-color: var(--lp-ember);
+}
+
+/* ---------- code frames ---------- */
+
+.md-typeset .lp-file {
+  text-align: left;
+}
+
+.lp-file {
+  background: var(--lp-code-bg);
+  border: 1px solid #1e272e;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.lp-file__bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 13px;
+  border-bottom: 1px solid #1b242b;
+  font-family: var(--md-code-font);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: #7b878f;
+}
+
+.lp-file__len {
+  color: #7b878f;
+}
+
+/* The docs theme styles every `pre` inside `.md-typeset`; these four
+   declarations are the ones it insists on, hence the !important. */
+.md-typeset pre.lp-code {
+  display: block !important;
+  margin: 0;
+  padding: 16px 16px 18px !important;
+  overflow-x: auto !important;
+  font-family: var(--md-code-font);
+  font-size: 0.73rem;
+  line-height: 1.78;
+  color: var(--lp-code-fg);
+  background: none;
+  white-space: pre !important;
+  tab-size: 4;
+}
+
+.md-typeset .lp-code > code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre !important;
+  overflow: visible;
+  box-shadow: none;
+}
+
+/* Code frames, the copy button and the footer nav are forced from an inline
+   block in overrides/partials/landing.html — the theme outranks a linked sheet. */
+
+.t-dec {
+  color: var(--lp-ember-soft);
+}
+
+.t-str {
+  color: var(--lp-code-str);
+}
+
+.t-imp {
+  color: var(--lp-code-dim);
+}
+
+/* ---------- counts ---------- */
+
+.lp-counts {
+  border-bottom: 1px solid var(--lp-line);
+  background: var(--lp-wash);
+}
+
+.lp-counts__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding-top: 22px;
+  padding-bottom: 22px;
+}
+
+.lp-count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-left: 22px;
+  border-left: 1px solid var(--lp-line);
+}
+
+.lp-count:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.lp-count__n {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-count__l {
+  font-family: var(--md-code-font);
+  font-size: 0.66rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--lp-muted);
+}
+
+/* ---------- sections ---------- */
+
+.lp-section {
+  padding-top: 68px;
+  padding-bottom: 68px;
+  border-bottom: 1px solid var(--lp-line);
+}
+
+.lp h2 {
+  text-wrap: balance;
+  font-size: 1.55rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.lp-sub {
+  margin-top: 12px !important;
+  max-width: 62ch;
+  font-size: 0.95rem;
+  line-height: 1.62;
+  color: var(--lp-muted);
+}
+
+.lp-note {
+  margin-top: 18px !important;
+  max-width: 66ch;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  color: var(--lp-muted);
+}
+
+.lp-sub code,
+.lp-note code {
+  font-family: var(--md-code-font);
+  font-size: 0.84em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--lp-wash);
+  border: 1px solid var(--lp-line);
+  color: var(--lp-ink);
+}
+
+.lp-ba {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.lp-file--quiet {
+  opacity: 0.86;
+}
+
+/* ---------- operations table ---------- */
+
+.lp-ops,
+.lp-routes {
+  width: 100%;
+  margin-top: 26px;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.lp-ops th {
+  text-align: left;
+  padding: 0 0 10px;
+  font-family: var(--md-code-font);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lp-muted);
+  font-weight: 400;
+  border-bottom: 1px solid var(--lp-line);
+}
+
+.lp-ops td {
+  padding: 11px 16px 11px 0;
+  border-bottom: 1px solid var(--lp-line);
+  vertical-align: top;
+}
+
+.lp-ops td code,
+.lp-routes td code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.lp-ops td:first-child {
+  white-space: nowrap;
+  width: 1%;
+  font-family: var(--md-code-font);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.lp-ops td:last-child {
+  color: var(--lp-muted);
+  line-height: 1.5;
+}
+
+.lp-ops tr:hover td:first-child {
+  color: var(--lp-ember-text);
+}
+
+/* ---------- two column ---------- */
+
+.lp-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 56px;
+}
+
+.lp-routes td {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--lp-line);
+  font-family: var(--md-code-font);
+  font-size: 0.82rem;
+}
+
+.lp-routes td:first-child,
+.lp-routes td:last-child {
+  width: 45%;
+}
+
+.lp-arrow {
+  color: var(--lp-ember-text);
+  text-align: center;
+  width: 10%;
+}
+
+.lp-sensors {
+  margin-top: 26px !important;
+  padding: 0;
+  list-style: none;
+}
+
+.lp-sensors li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--lp-line);
+}
+
+.lp-sensors code {
+  font-family: var(--md-code-font);
+  font-size: 0.82rem;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.lp-sensors span {
+  font-size: 0.86rem;
+  color: var(--lp-muted);
+}
+
+/* ---------- close ---------- */
+
+.lp-close {
+  background: var(--lp-band-bg);
+  color: var(--lp-band-fg);
+  border-top: 1px solid var(--lp-band-line);
+  padding: 56px 0 60px;
+}
+
+.lp-close__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
+  gap: 48px;
+  align-items: center;
+}
+
+.lp-close h2 {
+  color: var(--lp-band-fg);
+}
+
+.lp-close .lp-sub {
+  color: var(--lp-band-dim);
+}
+
+.lp-cmd--dark {
+  margin-top: 0;
+}
+
+/* ---------- small screens ---------- */
+
+@media (max-width: 900px) {
+  .lp-hero__grid,
+  .lp-ba,
+  .lp-two,
+  .lp-close__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 34px;
+  }
+
+  .lp-hero {
+    padding: 40px 0 44px;
+  }
+
+  .lp-hero__mark {
+    width: 52px;
+    height: 52px;
+    margin-bottom: 22px;
+  }
+
+  .lp-counts__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 0;
+  }
+
+  .lp-count:nth-child(3) {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .lp-section {
+    padding-top: 44px;
+    padding-bottom: 44px;
+  }
+
+  .lp-ops td code,
+.lp-routes td code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.lp-ops td:first-child {
+    white-space: normal;
+  }
+
+  .lp-lead {
+    font-size: 1rem;
+  }
+}

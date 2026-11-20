@@ -1,0 +1,180 @@
+/* AirSQL brand layer: type, colour tokens, header mark.
+   Decisions are recorded in DESIGN.md at the repo root. */
+
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/inter-latin.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../fonts/jetbrains-mono-latin.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --brand-ink: #0f1418;
+  --brand-ember: #e8582a;
+  --brand-paper: #ffffff;
+  --md-text-font: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --md-code-font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Header mark: ink on the light scheme, white on the dark one. */
+.md-header__button.md-logo {
+  padding: 0.2rem;
+  margin-right: 0.1rem;
+}
+
+.md-header__button.md-logo img {
+  width: auto;
+  height: 1.45rem;
+}
+
+/* The mark follows the header surface: ink on the paper header, white on the
+   ink one. The theme's own `img` rules are more specific than a bare class,
+   hence the full selector chain on both sides. */
+.md-header .md-logo img.airsql-logo--on-dark,
+.md-nav .md-logo img.airsql-logo--on-dark {
+  display: none;
+}
+
+.md-header .md-logo img.airsql-logo--on-light,
+.md-nav .md-logo img.airsql-logo--on-light {
+  display: block;
+}
+
+body[data-md-color-scheme="slate"] .md-header .md-logo img.airsql-logo--on-light,
+body[data-md-color-scheme="slate"] .md-nav .md-logo img.airsql-logo--on-light {
+  display: none;
+}
+
+body[data-md-color-scheme="slate"] .md-header .md-logo img.airsql-logo--on-dark,
+body[data-md-color-scheme="slate"] .md-nav .md-logo img.airsql-logo--on-dark {
+  display: block;
+}
+
+/* The palette ships `[data-md-color-primary=black] .md-header` with a hardcoded
+   ground, so the surfaces are painted explicitly per scheme. */
+body[data-md-color-scheme="default"] .md-header,
+body[data-md-color-scheme="default"] .md-tabs,
+body[data-md-color-scheme="default"] .md-nav--primary .md-nav__title[for="__drawer"],
+body:not([data-md-color-scheme]) .md-header,
+body:not([data-md-color-scheme]) .md-tabs,
+body:not([data-md-color-scheme]) .md-nav--primary .md-nav__title[for="__drawer"] {
+  --md-primary-fg-color: #ffffff;
+  --md-primary-fg-color--light: #f7f7f5;
+  --md-primary-fg-color--dark: #eeeeec;
+  --md-primary-bg-color: #0f1418;
+  --md-primary-bg-color--light: rgba(15, 20, 24, 0.72);
+  background-color: #ffffff;
+}
+
+body[data-md-color-scheme="slate"] .md-header,
+body[data-md-color-scheme="slate"] .md-tabs,
+body[data-md-color-scheme="slate"] .md-nav--primary .md-nav__title[for="__drawer"] {
+  background-color: #0b1116;
+}
+
+/* A paper header needs an edge; the ink one already separates itself. */
+body[data-md-color-scheme="default"] .md-header,
+body:not([data-md-color-scheme]) .md-header {
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* ---------------------------------------------------------------------------
+   Theme palettes. The docs ship the brand's ink and ember in both schemes;
+   Material presets (black/grey) are only the fallback for anything below.
+   --------------------------------------------------------------------------- */
+
+:root,
+[data-md-color-scheme="default"],
+body[data-md-color-scheme="default"][data-md-color-primary],
+body[data-md-color-scheme="default"][data-md-color-accent] {
+  --md-primary-fg-color: #ffffff;
+  --md-primary-fg-color--light: #f7f7f5;
+  --md-primary-fg-color--dark: #eeeeec;
+  --md-primary-bg-color: #0f1418;
+  --md-primary-bg-color--light: rgba(15, 20, 24, 0.72);
+  --md-accent-fg-color: #c64217;
+  --md-accent-fg-color--transparent: rgba(198, 66, 23, 0.1);
+  --md-typeset-a-color: #c64217;
+  --md-typeset-mark-color: rgba(232, 88, 42, 0.2);
+  --md-code-bg-color: #f5f4f1;
+  --md-code-fg-color: #1a2228;
+  --md-footer-bg-color: #ffffff;
+  --md-footer-bg-color--dark: #f7f7f5;
+  --md-footer-fg-color: #5b6670;
+  --md-footer-fg-color--light: #7b878f;
+  --md-footer-fg-color--lighter: #9aa3aa;
+}
+
+[data-md-color-scheme="slate"],
+body[data-md-color-scheme="slate"][data-md-color-primary],
+body[data-md-color-scheme="slate"][data-md-color-accent] {
+  --md-hue: 206;
+  --md-default-fg-color: #dfe6ea;
+  --md-default-fg-color--light: #a9b4bc;
+  --md-default-fg-color--lighter: #6f7c86;
+  --md-default-fg-color--lightest: #232d34;
+  --md-default-bg-color: #0f1418;
+  --md-default-bg-color--light: rgba(15, 20, 24, 0.6);
+  --md-default-bg-color--lighter: rgba(15, 20, 24, 0.3);
+  --md-default-bg-color--lightest: rgba(15, 20, 24, 0.12);
+  --md-primary-fg-color: #0b1116;
+  --md-primary-fg-color--light: #151d23;
+  --md-primary-fg-color--dark: #090e12;
+  --md-primary-bg-color: #eef2f5;
+  --md-primary-bg-color--light: rgba(238, 242, 245, 0.7);
+  --md-accent-fg-color: #f0703f;
+  --md-accent-fg-color--transparent: rgba(240, 112, 63, 0.12);
+  --md-typeset-a-color: #f0703f;
+  --md-typeset-mark-color: rgba(232, 88, 42, 0.24);
+  --md-code-bg-color: #161e24;
+  --md-code-fg-color: #dbe3e9;
+  --md-footer-bg-color: #0b1116;
+  --md-footer-bg-color--dark: #090e12;
+}
+
+/* Headings at full strength: the theme greys every h1 to the "light" tone,
+   which reads as placeholder text next to the body copy. */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  color: var(--md-default-fg-color);
+}
+
+/* Code blocks get the same hairline the landing's frames use. */
+.md-typeset pre > code {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.15rem;
+}
+
+.md-typeset table:not([class]) th {
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* The header search is drawn as a translucent pill over the ink primary; on a
+   paper header that turns into a grey blob, so it gets a surface instead. */
+body[data-md-color-scheme="default"] .md-search__button,
+body:not([data-md-color-scheme]) .md-search__button {
+  background: #f5f4f1;
+  box-shadow: inset 0 0 0 1px var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color);
+}
+
+body[data-md-color-scheme="default"] .md-search__button:before,
+body:not([data-md-color-scheme]) .md-search__button:before {
+  background-color: var(--md-default-fg-color--light);
+}
+
+body[data-md-color-scheme="default"] .md-search__button:after,
+body:not([data-md-color-scheme]) .md-search__button:after {
+  background: var(--md-default-fg-color--lightest);
+}

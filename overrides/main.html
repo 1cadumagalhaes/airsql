@@ -1,0 +1,20 @@
+{#- AirSQL: home page is a landing, every other page stays documentation. -#}
+{% extends "base.html" %}
+
+{% block fonts %}{% endblock %}
+
+{% block htmltitle %}
+  {% if page and page.url == "" %}
+    <title>AirSQL — decorator-based SQL for Apache Airflow</title>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if page and page.url == "" %}
+    {% include "partials/landing.html" %}
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}

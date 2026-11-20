@@ -1,0 +1,8 @@
+{#- AirSQL: the mark ships in two tints so it survives both palettes. -#}
+{% if config.theme.logo %}
+  <img class="airsql-logo--on-light" src="{{ config.theme.logo | url }}" alt="{{ config.site_name }}">
+  <img class="airsql-logo--on-dark" src="{{ 'assets/brand/airsql-mark-inverse.svg' | url }}" alt="{{ config.site_name }}">
+{% else %}
+  {% set icon = config.theme.icon.logo or "material/library" %}
+  {% include ".icons/" ~ icon ~ ".svg" %}
+{% endif %}

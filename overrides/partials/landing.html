@@ -1,0 +1,216 @@
+<style>
+/* The docs theme ships `pre`/`code` typography from a stylesheet that
+   outranks the page's own, so the frames state their type here. */
+.md-typeset .lp-file pre,
+.md-typeset .lp-file code {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace !important;
+  font-size: 0.72rem !important;
+  line-height: 1.8 !important;
+  white-space: pre !important;
+  tab-size: 4;
+}
+
+.md-typeset pre.lp-code {
+  display: block !important;
+  margin: 0;
+  padding: 16px 16px 18px !important;
+  overflow-x: auto !important;
+  background: none !important;
+  color: var(--lp-code-fg);
+  scrollbar-width: none;
+}
+
+@supports not (scrollbar-width: none) {
+  .md-typeset pre.lp-code::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+body:has(.lp) .md-code__nav,
+body:has(.lp) .md-code__button,
+body:has(.lp) .md-clipboard {
+  display: none !important;
+}
+
+/* zensical draws its copy affordance as a background icon. */
+.md-typeset .lp-file pre,
+.md-typeset .lp-file code {
+  background-image: none !important;
+}
+
+body:has(.lp) .md-tabs,
+body:has(.lp) .md-main,
+body:has(.lp) .md-main__inner,
+body:has(.lp) .md-footer__inner {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+/* The theme starts the article with an 8px spacer pseudo-element. */
+body:has(.lp) .md-typeset::before {
+  display: none;
+}
+
+body:has(.lp) .md-footer__inner {
+  display: none;
+}
+
+body:has(.lp) .md-main,
+body:has(.lp) .md-content__inner,
+body:has(.lp) .md-footer {
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+</style>
+<div class="lp">
+
+  <section class="lp-hero">
+    <div class="lp-wrap lp-hero__grid">
+      <div class="lp-hero__copy">
+        <img class="lp-hero__mark lp-hero__mark--on-light" src="assets/brand/airsql-mark.svg" alt="" width="76" height="76">
+        <img class="lp-hero__mark lp-hero__mark--on-dark" src="assets/brand/airsql-mark-inverse.svg" alt="" width="76" height="76">
+        <p class="lp-meta"><span>v0.18.1</span><span>MIT</span><span>Airflow 3</span><span>Python ≥ 3.12</span></p>
+        <h1>SQL as a Python function.</h1>
+        <p class="lp-lead">
+          AirSQL turns a decorated function into an Airflow task that reads, writes and
+          moves data across PostgreSQL, BigQuery and GCS — without the operator
+          boilerplate, and without SQL buried in keyword arguments.
+        </p>
+        <div class="lp-cmd">
+          <span class="lp-cmd__sign" aria-hidden="true">$</span><code>uv add airsql</code>
+        </div>
+        <p class="lp-hero__links">
+          <a href="getting-started/">Get started</a>
+          <a href="usage/query/">Usage</a>
+          <a href="reference/">API reference</a>
+          <a href="https://github.com/1cadumagalhaes/airsql">GitHub</a>
+        </p>
+      </div>
+
+      <figure class="lp-file">
+        <figcaption class="lp-file__bar"><span class="lp-file__name">dags/sync_users.py</span></figcaption>
+        <pre class="lp-code"><code><span class="t-imp">from</span> airsql <span class="t-imp">import</span> sql, Table
+
+<span class="t-dec">@sql.merge(</span>
+<span class="t-dec">    output_table=Table(</span><span class="t-str">"pg_conn"</span><span class="t-dec">, </span><span class="t-str">"public.users"</span><span class="t-dec">),</span>
+<span class="t-dec">    conflict_columns=[</span><span class="t-str">"id"</span><span class="t-dec">],</span>
+<span class="t-dec">    update_columns=[</span><span class="t-str">"name"</span><span class="t-dec">, </span><span class="t-str">"email"</span><span class="t-dec">],</span>
+<span class="t-dec">)</span>
+<span class="t-imp">def</span> sync_users():
+    <span class="t-imp">return</span> <span class="t-str">"SELECT id, name, email FROM staging"</span>
+
+sync_users()</code></pre>
+      </figure>
+    </div>
+  </section>
+
+  <section class="lp-counts">
+    <div class="lp-wrap lp-counts__grid">
+      <div class="lp-count"><span class="lp-count__n">12</span><span class="lp-count__l">write operations</span></div>
+      <div class="lp-count"><span class="lp-count__n">4</span><span class="lp-count__l">transfer routes</span></div>
+      <div class="lp-count"><span class="lp-count__n">2</span><span class="lp-count__l">sensor types</span></div>
+      <div class="lp-count"><span class="lp-count__n">3</span><span class="lp-count__l">platforms, one API</span></div>
+    </div>
+  </section>
+
+  <section class="lp-section lp-wrap">
+    <h2>The same upsert, written twice</h2>
+    <p class="lp-sub">On the left, plain Airflow: you write the <code>ON CONFLICT</code> clause and hope the columns stay in sync. On the right, the operation is the name.</p>
+    <div class="lp-ba">
+      <figure class="lp-file lp-file--quiet">
+        <figcaption class="lp-file__bar"><span class="lp-file__name">dags/sync_users.py — plain Airflow</span><span class="lp-file__len">18 lines</span></figcaption>
+        <pre class="lp-code"><code><span class="t-imp">from</span> airflow.providers.common.sql.operators <span class="t-imp">import</span> (
+    SQLExecuteQueryOperator,
+)
+
+sync_users = SQLExecuteQueryOperator(
+    task_id=<span class="t-str">"sync_users"</span>,
+    conn_id=<span class="t-str">"pg_conn"</span>,
+    sql=<span class="t-str">"""
+        INSERT INTO public.users
+            (id, name, email)
+        SELECT id, name, email FROM staging
+        ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            email = EXCLUDED.email
+    """</span>,
+)</code></pre>
+      </figure>
+
+      <figure class="lp-file">
+        <figcaption class="lp-file__bar"><span class="lp-file__name">dags/sync_users.py — AirSQL</span><span class="lp-file__len">9 lines</span></figcaption>
+        <pre class="lp-code"><code><span class="t-imp">from</span> airsql <span class="t-imp">import</span> sql, Table
+
+<span class="t-dec">@sql.merge(</span>
+<span class="t-dec">    output_table=Table(</span><span class="t-str">"pg_conn"</span><span class="t-dec">, </span><span class="t-str">"public.users"</span><span class="t-dec">),</span>
+<span class="t-dec">    conflict_columns=[</span><span class="t-str">"id"</span><span class="t-dec">],</span>
+<span class="t-dec">    update_columns=[</span><span class="t-str">"name"</span><span class="t-dec">, </span><span class="t-str">"email"</span><span class="t-dec">],</span>
+<span class="t-dec">)</span>
+<span class="t-imp">def</span> sync_users():
+    <span class="t-imp">return</span> <span class="t-str">"SELECT id, name, email FROM staging"</span></code></pre>
+      </figure>
+    </div>
+    <p class="lp-note">The decorator returns a task: call it in your DAG the way you call any TaskFlow function. The SQL stays a string you can read, render with Jinja, or keep in a <code>.sql</code> file.</p>
+  </section>
+
+  <section class="lp-section lp-wrap">
+    <h2>Every write you actually need</h2>
+    <p class="lp-sub">One decorator per operation. Each is also available as an operator class when you prefer <code>&gt;&gt;</code> wiring.</p>
+    <table class="lp-ops">
+      <thead><tr><th scope="col">Decorator</th><th scope="col">What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>sql.dataframe</code></td><td>Run a query and return a pandas DataFrame to the next task.</td></tr>
+        <tr><td><code>sql.query</code></td><td>Create a table from a query — no DDL to write.</td></tr>
+        <tr><td><code>sql.append</code></td><td>Append the query's rows to an existing table.</td></tr>
+        <tr><td><code>sql.replace</code></td><td>Replace the target table's contents in one step.</td></tr>
+        <tr><td><code>sql.truncate</code></td><td>Truncate, then reload — the cheap full refresh.</td></tr>
+        <tr><td><code>sql.merge</code></td><td>Upsert on conflict columns, with the update list you declare.</td></tr>
+        <tr><td><code>sql.load_dataframe</code></td><td>Write a DataFrame into a table without hand-rolled inserts.</td></tr>
+        <tr><td><code>sql.merge_dataframe</code></td><td>Upsert a DataFrame against an existing table.</td></tr>
+        <tr><td><code>sql.extract_and_load</code></td><td>Copy a query's result from one connection to another table.</td></tr>
+        <tr><td><code>sql.extract_and_merge</code></td><td>The same hop, merged into the destination instead of replaced.</td></tr>
+        <tr><td><code>sql.check</code></td><td>A data-quality assertion: the task fails when the query says so.</td></tr>
+        <tr><td><code>sql.ddl</code></td><td>Create, alter or drop, with the same connection handling.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="lp-section lp-wrap lp-two">
+    <div>
+      <h2>Across warehouses, through GCS</h2>
+      <p class="lp-sub">Transfers pick the staging format, convert types and clean up after themselves.</p>
+      <table class="lp-routes">
+        <tbody>
+          <tr><td>PostgreSQL</td><td class="lp-arrow">→</td><td>BigQuery</td></tr>
+          <tr><td>BigQuery</td><td class="lp-arrow">→</td><td>PostgreSQL</td></tr>
+          <tr><td>PostgreSQL</td><td class="lp-arrow">→</td><td>GCS</td></tr>
+          <tr><td>GCS</td><td class="lp-arrow">→</td><td>PostgreSQL</td></tr>
+        </tbody>
+      </table>
+      <p class="lp-note">Every route supports dry runs, chunked extraction and schema overrides when a column needs pinning.</p>
+    </div>
+    <div>
+      <h2>Sensors that wait properly</h2>
+      <p class="lp-sub">Poll a query until it returns true, with retries and poke intervals instead of a sleep in a PythonOperator.</p>
+      <ul class="lp-sensors">
+        <li><code>PostgresSqlSensor</code><span>Wait for a condition in PostgreSQL.</span></li>
+        <li><code>BigQuerySqlSensor</code><span>Wait for a condition in BigQuery.</span></li>
+      </ul>
+      <p class="lp-note">Both are deferrable-friendly and take the same connection and SQL you already use elsewhere.</p>
+    </div>
+  </section>
+
+  <section class="lp-close">
+    <div class="lp-wrap lp-close__grid">
+      <div>
+        <h2>Install it, write a function.</h2>
+        <p class="lp-sub">Airflow 3 required. Airflow 2 is out of scope until the v2 line decouples the core.</p>
+      </div>
+      <div>
+        <div class="lp-cmd lp-cmd--dark"><span class="lp-cmd__sign" aria-hidden="true">$</span><code>uv add airsql</code></div>
+        <p class="lp-hero__links"><a href="getting-started/">Getting started</a><a href="examples/">Examples</a><a href="changelog/">Changelog</a></p>
+      </div>
+    </div>
+  </section>
+
+</div>
