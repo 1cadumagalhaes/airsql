@@ -1,3 +1,7 @@
+---
+description: "BigQuerySqlSensor polls a query until it returns a truthy value, with configurable retries and poke interval."
+---
+
 # BigQuery Sensor
 
 The `BigQuerySqlSensor` executes SQL queries against BigQuery and succeeds when results are truthy.

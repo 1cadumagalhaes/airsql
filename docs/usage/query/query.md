@@ -1,3 +1,7 @@
+---
+description: "@sql.query creates a destination table from a query — no DDL to write, no operator boilerplate."
+---
+
 # Query to Table
 
 The `@sql.query` decorator and `SQLQueryOperator` execute SQL and write results to a destination table.

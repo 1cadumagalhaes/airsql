@@ -1,5 +1,6 @@
 ---
 icon: lucide/radar
+description: "SQL-based sensors for PostgreSQL and BigQuery: poll a condition until it passes, with retries instead of sleeps."
 ---
 
 # Sensors Guide

@@ -1,3 +1,7 @@
+---
+description: "@sql.check turns a SQL condition into a data-quality gate: the task fails when the query says so."
+---
+
 # Data Quality Checks
 
 The `@sql.check` decorator and `SQLCheckOperator` execute SQL data quality checks that pass if all returned values are truthy.

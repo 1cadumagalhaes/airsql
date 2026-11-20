@@ -1,3 +1,7 @@
+---
+description: "@sql.load_dataframe writes a pandas DataFrame into a database table without hand-rolled inserts."
+---
+
 # Load DataFrame
 
 The `@sql.load_dataframe` decorator and `DataFrameLoadOperator` load a pandas DataFrame directly into a database table.

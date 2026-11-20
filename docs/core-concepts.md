@@ -1,5 +1,6 @@
 ---
 icon: lucide/lightbulb
+description: "Tables, connections, decorators and SQL files — the four pieces every AirSQL DAG is built from."
 ---
 
 # Core Concepts

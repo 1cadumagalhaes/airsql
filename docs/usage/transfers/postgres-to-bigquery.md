@@ -1,3 +1,7 @@
+---
+description: "PostgreSQL to BigQuery through GCS staging, with format handling and BigQuery type detection."
+---
+
 # PostgreSQL to BigQuery
 
 Transfer data from PostgreSQL to BigQuery via Google Cloud Storage with automatic format handling and schema detection.

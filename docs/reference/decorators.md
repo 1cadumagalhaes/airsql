@@ -1,5 +1,6 @@
 ---
 icon: lucide/code
+description: "API reference for the sql object: every decorator, its parameters and what it adds to your DAG."
 ---
 
 # Decorators API Reference

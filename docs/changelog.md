@@ -1,5 +1,6 @@
 ---
 icon: lucide/list-checks
+description: "Every AirSQL release, with the changes that matter and the version each one shipped in."
 ---
 
 # Release Notes

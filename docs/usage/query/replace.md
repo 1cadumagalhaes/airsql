@@ -1,3 +1,7 @@
+---
+description: "@sql.replace swaps the target table's contents in one step, keeping the schema you already have."
+---
+
 # Replace Table
 
 The `@sql.replace` decorator and `SQLReplaceOperator` execute SQL and completely replace the destination table content.

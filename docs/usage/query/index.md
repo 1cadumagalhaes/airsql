@@ -1,5 +1,6 @@
 ---
 icon: lucide/database
+description: "Every write AirSQL supports, from returning a DataFrame to a merge/upsert, with decorator and operator usage."
 ---
 
 # Query Guide

@@ -1,3 +1,7 @@
+---
+description: "@sql.merge upserts a query's rows on conflict columns, with the update list you declare."
+---
+
 # Merge/Upsert
 
 The `@sql.merge` decorator and `SQLMergeOperator` execute SQL and merge (upsert) results into a table, updating existing rows or inserting new ones based on conflict columns.

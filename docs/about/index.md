@@ -1,5 +1,6 @@
 ---
 icon: lucide/info
+description: "Why AirSQL exists: a one-person data team's answer to astro-sdk's deprecation, and the principles behind the decorator-first API."
 ---
 
 # About AirSQL

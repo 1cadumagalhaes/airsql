@@ -1,5 +1,6 @@
 ---
 icon: lucide/book-open
+description: "Guides for AirSQL's three families of tools: query operations, sensors and transfer operators."
 ---
 
 # Usage

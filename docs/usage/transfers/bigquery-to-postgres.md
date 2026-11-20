@@ -1,3 +1,7 @@
+---
+description: "BigQuery to PostgreSQL through GCS staging, with schema detection, validation and cleanup handled for you."
+---
+
 # BigQuery to PostgreSQL
 
 Transfer data from BigQuery to PostgreSQL via Google Cloud Storage with automatic validation and cleanup.

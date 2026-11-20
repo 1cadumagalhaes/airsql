@@ -1,5 +1,6 @@
 ---
 icon: lucide/play
+description: "Install AirSQL with uv or pip and write your first decorated query task against PostgreSQL or BigQuery."
 ---
 
 # Getting Started with AirSQL

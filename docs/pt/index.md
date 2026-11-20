@@ -1,7 +1,7 @@
 ---
 title: AirSQL
 icon: lucide/database
-description: O AirSQL transforma funções Python decoradas em tasks do Airflow que leem, gravam e movem dados entre PostgreSQL, BigQuery e GCS.
+description: "O AirSQL transforma funções Python decoradas em tasks do Airflow que leem, gravam e movem dados entre PostgreSQL, BigQuery e GCS."
 hide:
   - navigation
   - toc

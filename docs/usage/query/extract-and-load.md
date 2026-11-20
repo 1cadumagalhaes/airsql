@@ -1,3 +1,7 @@
+---
+description: "@sql.extract_and_load copies a query's result from one connection into a table on another, in one task."
+---
+
 # Extract and Load
 
 The `@sql.extract_and_load` decorator combines SQL extraction and DataFrame loading into a single TaskFlow-compatible task.

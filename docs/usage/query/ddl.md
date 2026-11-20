@@ -1,3 +1,7 @@
+---
+description: "@sql.ddl runs CREATE, ALTER and DROP with the same connection handling as every other operation."
+---
+
 # DDL Operations
 
 The `@sql.ddl` decorator executes DDL (Data Definition Language) statements like CREATE, ALTER, and DROP.

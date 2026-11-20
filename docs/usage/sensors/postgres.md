@@ -1,3 +1,7 @@
+---
+description: "PostgresSqlSensor polls a query until it returns a truthy value, with configurable retries and poke interval."
+---
+
 # PostgreSQL Sensor
 
 The `PostgresSqlSensor` executes SQL queries against PostgreSQL and succeeds when results are truthy.

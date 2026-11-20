@@ -1,3 +1,7 @@
+---
+description: "@sql.append writes a query's rows into an existing table without recreating it."
+---
+
 # Append to Table
 
 The `@sql.append` decorator and `SQLAppendOperator` execute SQL and append results to an existing table.

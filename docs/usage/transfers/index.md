@@ -1,5 +1,6 @@
 ---
 icon: lucide/arrow-right-left
+description: "Move data between PostgreSQL, BigQuery and Google Cloud Storage — four routes, one operator each."
 ---
 
 # Transfer Operators Guide

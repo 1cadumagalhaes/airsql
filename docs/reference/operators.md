@@ -1,5 +1,6 @@
 ---
 icon: lucide/database
+description: "API reference for the operator classes, for wiring tasks with >> instead of decorators."
 ---
 
 # Operators API Reference

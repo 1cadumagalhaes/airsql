@@ -1,3 +1,7 @@
+---
+description: "@sql.dataframe runs a query and hands a pandas DataFrame to the next task in the DAG."
+---
+
 # Return DataFrame
 
 The `@sql.dataframe` decorator and `SQLDataFrameOperator` execute SQL queries and return the results as a pandas DataFrame.

@@ -1,3 +1,7 @@
+---
+description: "@sql.extract_and_merge makes the same cross-connection hop, merged into the destination instead of replaced."
+---
+
 # Extract and Merge
 
 The `@sql.extract_and_merge` decorator combines SQL extraction and DataFrame merging into a single TaskFlow-compatible task.

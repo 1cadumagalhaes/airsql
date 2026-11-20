@@ -1,3 +1,7 @@
+---
+description: "@sql.truncate empties a table and reloads it, keeping the structure — the cheap full refresh."
+---
+
 # Truncate and Reload
 
 The `@sql.truncate` decorator and `SQLTruncateOperator` truncate a table's data while preserving its structure, then insert new data.

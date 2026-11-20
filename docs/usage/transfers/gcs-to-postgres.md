@@ -1,3 +1,7 @@
+---
+description: "Load CSV, JSONL or Parquet files from Google Cloud Storage straight into a PostgreSQL table."
+---
+
 # GCS to PostgreSQL
 
 Import data from Google Cloud Storage files directly into PostgreSQL tables.

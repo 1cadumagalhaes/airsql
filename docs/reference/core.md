@@ -1,5 +1,6 @@
 ---
 icon: lucide/box
+description: "API reference for the core classes: Table, connection handling and the operation each decorator runs."
 ---
 
 # Core Classes API Reference

@@ -1,5 +1,6 @@
 ---
 icon: lucide/code
+description: "Complete Airflow DAG examples: query operations, cross-database transfers and data quality checks."
 ---
 
 # Examples

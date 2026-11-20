@@ -1,5 +1,6 @@
 ---
 icon: lucide/book-open
+description: "Auto-generated API documentation for every AirSQL class, decorator, operator, sensor and transfer."
 ---
 
 # API Reference

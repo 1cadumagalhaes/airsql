@@ -1,3 +1,7 @@
+---
+description: "@sql.merge_dataframe upserts a DataFrame into an existing table on the conflict columns you declare."
+---
+
 # Merge DataFrame
 
 The `@sql.merge_dataframe` decorator and `DataFrameMergeOperator` merge a pandas DataFrame into a table with upsert logic.

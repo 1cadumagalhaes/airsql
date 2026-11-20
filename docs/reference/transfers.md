@@ -1,5 +1,6 @@
 ---
 icon: lucide/arrow-right-left
+description: "API reference for the transfer operators across BigQuery, PostgreSQL and Google Cloud Storage."
 ---
 
 # Transfers API Reference

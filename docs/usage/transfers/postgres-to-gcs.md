@@ -1,3 +1,7 @@
+---
+description: "Export a PostgreSQL query to Google Cloud Storage as CSV, JSONL or Parquet, chunked if you need it."
+---
+
 # PostgreSQL to GCS
 
 Export data from PostgreSQL directly to Google Cloud Storage in CSV, JSONL, or Parquet format.
