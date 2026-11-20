@@ -17,4 +17,4 @@ Allow: /
 User-agent: *
 Allow: /
 
-Sitemap: https://1cadumagalhaes.github.io/airsql/sitemap.xml
+Sitemap: https://cadumagalhaes.dev/airsql/sitemap.xml

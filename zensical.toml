@@ -1,6 +1,6 @@
 [project]
 site_name = "AirSQL"
-site_url = "https://1cadumagalhaes.github.io/airsql/"
+site_url = "https://cadumagalhaes.dev/airsql/"
 site_description = "AirSQL - A decorator-based SQL execution framework for Apache Airflow"
 site_author = "Cadu Magalhaes"
 repo_url = "https://github.com/1cadumagalhaes/airsql"
