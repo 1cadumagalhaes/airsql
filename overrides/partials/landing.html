@@ -1,3 +1,89 @@
+{%- set en = {
+  "meta": ["v0.18.1", "MIT", "Airflow 3", "Python ≥ 3.12"],
+  "h1": "SQL as a Python function.",
+  "lead": "AirSQL turns a decorated function into an Airflow task that reads, writes and moves data across PostgreSQL, BigQuery and GCS — without the operator boilerplate, and without SQL buried in keyword arguments.",
+  "links": [["getting-started/", "Get started"], ["usage/query/", "Usage"], ["reference/", "API reference"], ["https://github.com/1cadumagalhaes/airsql", "GitHub"]],
+  "counts": [["12", "write operations"], ["4", "transfer routes"], ["2", "sensor types"], ["3", "platforms, one API"]],
+  "compare_title": "The same upsert, written twice",
+  "compare_sub": "On the left, plain Airflow: you write the ON CONFLICT clause and hope the columns stay in sync. On the right, the operation is the name.",
+  "before_name": "dags/sync_users.py — plain Airflow",
+  "after_name": "dags/sync_users.py — AirSQL",
+  "before_len": "18 lines",
+  "after_len": "9 lines",
+  "compare_note": "The decorator returns a task: call it in your DAG the way you call any TaskFlow function. The SQL stays a string you can read, render with Jinja, or keep in a .sql file.",
+  "ops_title": "Every write you actually need",
+  "ops_sub": "One decorator per operation. Each is also available as an operator class when you prefer >> wiring.",
+  "ops_head": ["Decorator", "What it does"],
+  "ops": [
+    ["sql.dataframe", "Run a query and return a pandas DataFrame to the next task."],
+    ["sql.query", "Create a table from a query — no DDL to write."],
+    ["sql.append", "Append the query's rows to an existing table."],
+    ["sql.replace", "Replace the target table's contents in one step."],
+    ["sql.truncate", "Truncate, then reload — the cheap full refresh."],
+    ["sql.merge", "Upsert on conflict columns, with the update list you declare."],
+    ["sql.load_dataframe", "Write a DataFrame into a table without hand-rolled inserts."],
+    ["sql.merge_dataframe", "Upsert a DataFrame against an existing table."],
+    ["sql.extract_and_load", "Copy a query's result from one connection to another table."],
+    ["sql.extract_and_merge", "The same hop, merged into the destination instead of replaced."],
+    ["sql.check", "A data-quality assertion: the task fails when the query says so."],
+    ["sql.ddl", "Create, alter or drop, with the same connection handling."]
+  ],
+  "routes_title": "Across warehouses, through GCS",
+  "routes_sub": "Transfers pick the staging format, convert types and clean up after themselves.",
+  "routes_note": "Every route supports dry runs, chunked extraction and schema overrides when a column needs pinning.",
+  "sensors_title": "Sensors that wait properly",
+  "sensors_sub": "Poll a query until it returns true, with retries and poke intervals instead of a sleep in a PythonOperator.",
+  "sensors": [["PostgresSqlSensor", "Wait for a condition in PostgreSQL."], ["BigQuerySqlSensor", "Wait for a condition in BigQuery."]],
+  "sensors_note": "Both are deferrable-friendly and take the same connection and SQL you already use elsewhere.",
+  "close_title": "Install it, write a function.",
+  "close_sub": "Airflow 3 required. Airflow 2 is out of scope until the v2 line decouples the core.",
+  "close_links": [["getting-started/", "Getting started"], ["examples/", "Examples"], ["changelog/", "Changelog"]]
+} %}
+
+{%- set pt = {
+  "meta": ["v0.18.1", "MIT", "Airflow 3", "Python ≥ 3.12"],
+  "h1": "SQL como uma função Python.",
+  "lead": "O AirSQL transforma uma função decorada em uma task do Airflow que lê, grava e move dados entre PostgreSQL, BigQuery e GCS — sem o boilerplate de operadores e sem SQL escondido em argumentos.",
+  "links": [["getting-started/", "Começar"], ["usage/query/", "Uso"], ["reference/", "Referência da API"], ["https://github.com/1cadumagalhaes/airsql", "GitHub"]],
+  "counts": [["12", "operações de escrita"], ["4", "rotas de transferência"], ["2", "tipos de sensor"], ["3", "plataformas, uma API"]],
+  "compare_title": "O mesmo upsert, escrito duas vezes",
+  "compare_sub": "À esquerda, Airflow puro: você escreve o ON CONFLICT e torce para as colunas continuarem em sincronia. À direita, a operação é o nome.",
+  "before_name": "dags/sync_users.py — Airflow puro",
+  "after_name": "dags/sync_users.py — AirSQL",
+  "before_len": "18 linhas",
+  "after_len": "9 linhas",
+  "compare_note": "O decorator devolve uma task: chame na DAG como qualquer função do TaskFlow. O SQL continua uma string que você lê, renderiza com Jinja ou guarda num arquivo .sql.",
+  "ops_title": "Toda escrita que você precisa",
+  "ops_sub": "Um decorator por operação. Cada um também existe como classe de operador quando você prefere ligar com >>.",
+  "ops_head": ["Decorator", "O que faz"],
+  "ops": [
+    ["sql.dataframe", "Roda uma consulta e devolve um DataFrame do pandas para a próxima task."],
+    ["sql.query", "Cria uma tabela a partir de uma consulta — sem escrever DDL."],
+    ["sql.append", "Anexa as linhas da consulta a uma tabela existente."],
+    ["sql.replace", "Substitui o conteúdo da tabela de destino em um passo."],
+    ["sql.truncate", "Truncar e recarregar — o refresh completo barato."],
+    ["sql.merge", "Upsert pelas colunas de conflito, com a lista de updates que você declara."],
+    ["sql.load_dataframe", "Grava um DataFrame numa tabela sem montar INSERT à mão."],
+    ["sql.merge_dataframe", "Faz upsert de um DataFrame contra uma tabela existente."],
+    ["sql.extract_and_load", "Copia o resultado de uma consulta entre conexões."],
+    ["sql.extract_and_merge", "O mesmo salto, mas com merge no destino em vez de substituição."],
+    ["sql.check", "Uma asserção de qualidade: a task falha quando a consulta manda."],
+    ["sql.ddl", "Create, alter ou drop com o mesmo tratamento de conexão."]
+  ],
+  "routes_title": "Entre warehouses, via GCS",
+  "routes_sub": "As transferências escolhem o formato de staging, convertem tipos e limpam depois de si.",
+  "routes_note": "Toda rota aceita dry run, extração em chunks e overrides de schema quando uma coluna precisa ser fixada.",
+  "sensors_title": "Sensores que esperam direito",
+  "sensors_sub": "Consulte até a condição virar verdadeira, com retries e intervalo de poke em vez de um sleep num PythonOperator.",
+  "sensors": [["PostgresSqlSensor", "Espera uma condição no PostgreSQL."], ["BigQuerySqlSensor", "Espera uma condição no BigQuery."]],
+  "sensors_note": "Os dois aceitam a mesma conexão e o mesmo SQL que você já usa no resto da DAG.",
+  "close_title": "Instale, escreva uma função.",
+  "close_sub": "Requer Airflow 3. Airflow 2 fica fora até a linha v2 separar o core.",
+  "close_links": [["getting-started/", "Começando"], ["examples/", "Exemplos"], ["changelog/", "Changelog"]]
+} %}
+
+{%- set c = pt if page and page.url == "pt/" else en %}
+
 <style>
 /* The docs theme ships `pre`/`code` typography from a stylesheet that
    outranks the page's own, so the frames state their type here. */
@@ -62,28 +148,24 @@ body:has(.lp) .md-footer {
   margin-bottom: 0;
 }
 </style>
+
 <div class="lp">
 
   <section class="lp-hero">
     <div class="lp-wrap lp-hero__grid">
       <div class="lp-hero__copy">
-        <img class="lp-hero__mark lp-hero__mark--on-light" src="assets/brand/airsql-mark.svg" alt="" width="76" height="76">
-        <img class="lp-hero__mark lp-hero__mark--on-dark" src="assets/brand/airsql-mark-inverse.svg" alt="" width="76" height="76">
-        <p class="lp-meta"><span>v0.18.1</span><span>MIT</span><span>Airflow 3</span><span>Python ≥ 3.12</span></p>
-        <h1>SQL as a Python function.</h1>
-        <p class="lp-lead">
-          AirSQL turns a decorated function into an Airflow task that reads, writes and
-          moves data across PostgreSQL, BigQuery and GCS — without the operator
-          boilerplate, and without SQL buried in keyword arguments.
+        <img class="lp-hero__mark lp-hero__mark--on-light" src="{{ 'assets/brand/airsql-mark.svg' | url }}" alt="" width="76" height="76">
+        <img class="lp-hero__mark lp-hero__mark--on-dark" src="{{ 'assets/brand/airsql-mark-inverse.svg' | url }}" alt="" width="76" height="76">
+        <p class="lp-meta">
+          {%- for item in c.meta %}<span>{{ item }}</span>{% endfor -%}
         </p>
+        <h1>{{ c.h1 }}</h1>
+        <p class="lp-lead">{{ c.lead }}</p>
         <div class="lp-cmd">
           <span class="lp-cmd__sign" aria-hidden="true">$</span><code>uv add airsql</code>
         </div>
         <p class="lp-hero__links">
-          <a href="getting-started/">Get started</a>
-          <a href="usage/query/">Usage</a>
-          <a href="reference/">API reference</a>
-          <a href="https://github.com/1cadumagalhaes/airsql">GitHub</a>
+          {%- for link in c.links %}<a href="{{ link[0] | url }}">{{ link[1] }}</a>{% endfor -%}
         </p>
       </div>
 
@@ -106,19 +188,18 @@ sync_users()</code></pre>
 
   <section class="lp-counts">
     <div class="lp-wrap lp-counts__grid">
-      <div class="lp-count"><span class="lp-count__n">12</span><span class="lp-count__l">write operations</span></div>
-      <div class="lp-count"><span class="lp-count__n">4</span><span class="lp-count__l">transfer routes</span></div>
-      <div class="lp-count"><span class="lp-count__n">2</span><span class="lp-count__l">sensor types</span></div>
-      <div class="lp-count"><span class="lp-count__n">3</span><span class="lp-count__l">platforms, one API</span></div>
+      {%- for item in c.counts %}
+      <div class="lp-count"><span class="lp-count__n">{{ item[0] }}</span><span class="lp-count__l">{{ item[1] }}</span></div>
+      {%- endfor %}
     </div>
   </section>
 
   <section class="lp-section lp-wrap">
-    <h2>The same upsert, written twice</h2>
-    <p class="lp-sub">On the left, plain Airflow: you write the <code>ON CONFLICT</code> clause and hope the columns stay in sync. On the right, the operation is the name.</p>
+    <h2>{{ c.compare_title }}</h2>
+    <p class="lp-sub">{{ c.compare_sub }}</p>
     <div class="lp-ba">
       <figure class="lp-file lp-file--quiet">
-        <figcaption class="lp-file__bar"><span class="lp-file__name">dags/sync_users.py — plain Airflow</span><span class="lp-file__len">18 lines</span></figcaption>
+        <figcaption class="lp-file__bar"><span class="lp-file__name">{{ c.before_name }}</span><span class="lp-file__len">{{ c.before_len }}</span></figcaption>
         <pre class="lp-code"><code><span class="t-imp">from</span> airflow.providers.common.sql.operators <span class="t-imp">import</span> (
     SQLExecuteQueryOperator,
 )
@@ -138,7 +219,7 @@ sync_users = SQLExecuteQueryOperator(
       </figure>
 
       <figure class="lp-file">
-        <figcaption class="lp-file__bar"><span class="lp-file__name">dags/sync_users.py — AirSQL</span><span class="lp-file__len">9 lines</span></figcaption>
+        <figcaption class="lp-file__bar"><span class="lp-file__name">{{ c.after_name }}</span><span class="lp-file__len">{{ c.after_len }}</span></figcaption>
         <pre class="lp-code"><code><span class="t-imp">from</span> airsql <span class="t-imp">import</span> sql, Table
 
 <span class="t-dec">@sql.merge(</span>
@@ -150,35 +231,26 @@ sync_users = SQLExecuteQueryOperator(
     <span class="t-imp">return</span> <span class="t-str">"SELECT id, name, email FROM staging"</span></code></pre>
       </figure>
     </div>
-    <p class="lp-note">The decorator returns a task: call it in your DAG the way you call any TaskFlow function. The SQL stays a string you can read, render with Jinja, or keep in a <code>.sql</code> file.</p>
+    <p class="lp-note">{{ c.compare_note }}</p>
   </section>
 
   <section class="lp-section lp-wrap">
-    <h2>Every write you actually need</h2>
-    <p class="lp-sub">One decorator per operation. Each is also available as an operator class when you prefer <code>&gt;&gt;</code> wiring.</p>
+    <h2>{{ c.ops_title }}</h2>
+    <p class="lp-sub">{{ c.ops_sub }}</p>
     <table class="lp-ops">
-      <thead><tr><th scope="col">Decorator</th><th scope="col">What it does</th></tr></thead>
+      <thead><tr><th scope="col">{{ c.ops_head[0] }}</th><th scope="col">{{ c.ops_head[1] }}</th></tr></thead>
       <tbody>
-        <tr><td><code>sql.dataframe</code></td><td>Run a query and return a pandas DataFrame to the next task.</td></tr>
-        <tr><td><code>sql.query</code></td><td>Create a table from a query — no DDL to write.</td></tr>
-        <tr><td><code>sql.append</code></td><td>Append the query's rows to an existing table.</td></tr>
-        <tr><td><code>sql.replace</code></td><td>Replace the target table's contents in one step.</td></tr>
-        <tr><td><code>sql.truncate</code></td><td>Truncate, then reload — the cheap full refresh.</td></tr>
-        <tr><td><code>sql.merge</code></td><td>Upsert on conflict columns, with the update list you declare.</td></tr>
-        <tr><td><code>sql.load_dataframe</code></td><td>Write a DataFrame into a table without hand-rolled inserts.</td></tr>
-        <tr><td><code>sql.merge_dataframe</code></td><td>Upsert a DataFrame against an existing table.</td></tr>
-        <tr><td><code>sql.extract_and_load</code></td><td>Copy a query's result from one connection to another table.</td></tr>
-        <tr><td><code>sql.extract_and_merge</code></td><td>The same hop, merged into the destination instead of replaced.</td></tr>
-        <tr><td><code>sql.check</code></td><td>A data-quality assertion: the task fails when the query says so.</td></tr>
-        <tr><td><code>sql.ddl</code></td><td>Create, alter or drop, with the same connection handling.</td></tr>
+        {%- for row in c.ops %}
+        <tr><td><code>{{ row[0] }}</code></td><td>{{ row[1] }}</td></tr>
+        {%- endfor %}
       </tbody>
     </table>
   </section>
 
   <section class="lp-section lp-wrap lp-two">
     <div>
-      <h2>Across warehouses, through GCS</h2>
-      <p class="lp-sub">Transfers pick the staging format, convert types and clean up after themselves.</p>
+      <h2>{{ c.routes_title }}</h2>
+      <p class="lp-sub">{{ c.routes_sub }}</p>
       <table class="lp-routes">
         <tbody>
           <tr><td>PostgreSQL</td><td class="lp-arrow">→</td><td>BigQuery</td></tr>
@@ -187,28 +259,31 @@ sync_users = SQLExecuteQueryOperator(
           <tr><td>GCS</td><td class="lp-arrow">→</td><td>PostgreSQL</td></tr>
         </tbody>
       </table>
-      <p class="lp-note">Every route supports dry runs, chunked extraction and schema overrides when a column needs pinning.</p>
+      <p class="lp-note">{{ c.routes_note }}</p>
     </div>
     <div>
-      <h2>Sensors that wait properly</h2>
-      <p class="lp-sub">Poll a query until it returns true, with retries and poke intervals instead of a sleep in a PythonOperator.</p>
+      <h2>{{ c.sensors_title }}</h2>
+      <p class="lp-sub">{{ c.sensors_sub }}</p>
       <ul class="lp-sensors">
-        <li><code>PostgresSqlSensor</code><span>Wait for a condition in PostgreSQL.</span></li>
-        <li><code>BigQuerySqlSensor</code><span>Wait for a condition in BigQuery.</span></li>
+        {%- for row in c.sensors %}
+        <li><code>{{ row[0] }}</code><span>{{ row[1] }}</span></li>
+        {%- endfor %}
       </ul>
-      <p class="lp-note">Both are deferrable-friendly and take the same connection and SQL you already use elsewhere.</p>
+      <p class="lp-note">{{ c.sensors_note }}</p>
     </div>
   </section>
 
   <section class="lp-close">
     <div class="lp-wrap lp-close__grid">
       <div>
-        <h2>Install it, write a function.</h2>
-        <p class="lp-sub">Airflow 3 required. Airflow 2 is out of scope until the v2 line decouples the core.</p>
+        <h2>{{ c.close_title }}</h2>
+        <p class="lp-sub">{{ c.close_sub }}</p>
       </div>
       <div>
         <div class="lp-cmd lp-cmd--dark"><span class="lp-cmd__sign" aria-hidden="true">$</span><code>uv add airsql</code></div>
-        <p class="lp-hero__links"><a href="getting-started/">Getting started</a><a href="examples/">Examples</a><a href="changelog/">Changelog</a></p>
+        <p class="lp-hero__links">
+          {%- for link in c.close_links %}<a href="{{ link[0] | url }}">{{ link[1] }}</a>{% endfor -%}
+        </p>
       </div>
     </div>
   </section>

@@ -123,6 +123,25 @@ home page, `article` elsewhere, title and description falling back to the site's
 page has none, absolute image URL built from `site_url`. Re-render the card whenever the
 claim, the version or the mark changes — a stale card is worse than none.
 
+## Language
+
+Zensical has no i18n plugin: `mkdocs-static-i18n` is accepted in the config and then
+ignored (verified — no output, no warning). So the site uses that plugin's **folder
+convention** by hand: translated pages live under `docs/pt/` at the same relative path
+as the original, which means a plugin can adopt the tree unchanged if zensical ever
+supports one.
+
+The landing is one partial with a copy dictionary per language, keyed off the page URL,
+so the layout cannot drift between the two. Links inside the translated page point at
+the sibling path (`../getting-started/`), falling back to the English page until that
+page exists in Portuguese.
+
+`[[project.extra.alternate]]` drives the header switcher and the `hreflang` links. Its
+links are absolute (`/airsql/pt/`) because the switcher renders on every page and a
+relative link would resolve against the page it sits on. Until the docs pages are
+translated, both entries point at the two home pages — a switch that loses your place
+is worse than no switch, so the selector is only meaningful where the pair exists.
+
 ## Do not
 
 - Do not add a second accent colour, a gradient, a glow, or an icon inside a tinted

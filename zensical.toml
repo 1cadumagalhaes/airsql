@@ -166,3 +166,16 @@ group_by_category = true
 show_category_heading = true
 show_labels = true
 filters = ["!^_[^_]"]
+
+# Language switcher + hreflang. Absolute paths: the deployed site lives under
+# /airsql/ and the switcher renders on every page, so a relative link would
+# resolve against the page it sits on.
+[[project.extra.alternate]]
+name = "Português"
+link = "/airsql/pt/"
+lang = "pt"
+
+[[project.extra.alternate]]
+name = "English"
+link = "/airsql/"
+lang = "en"

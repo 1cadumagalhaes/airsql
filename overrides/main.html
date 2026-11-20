@@ -30,7 +30,7 @@
 {% endblock %}
 
 {% block htmltitle %}
-  {% if page and page.url == "" %}
+  {% if page and page.url in ["", "pt/"] %}
     <title>AirSQL — decorator-based SQL for Apache Airflow</title>
   {% else %}
     {{ super() }}
@@ -38,7 +38,7 @@
 {% endblock %}
 
 {% block content %}
-  {% if page and page.url == "" %}
+  {% if page and page.url in ["", "pt/"] %}
     {% include "partials/landing.html" %}
   {% else %}
     {{ super() }}
