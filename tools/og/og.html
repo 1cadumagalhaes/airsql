@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AirSQL — social card</title>
+<style>
+  @font-face {
+    font-family: "Inter";
+    src: url("../../docs/assets/fonts/inter-latin.woff2") format("woff2");
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: block;
+  }
+
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("../../docs/assets/fonts/jetbrains-mono-latin.woff2") format("woff2");
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: block;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    width: 1200px;
+    height: 630px;
+  }
+
+  body {
+    background: #0b1116;
+    color: #eef2f5;
+    font-family: "Inter", system-ui, sans-serif;
+    /* the card is a landing surface, not a doc page */
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    padding: 56px 72px 48px;
+  }
+
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .top img {
+    width: 44px;
+    height: 44px;
+    display: block;
+  }
+
+  .wordmark {
+    font-size: 30px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  .wordmark span {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 700;
+    font-size: 28px;
+    letter-spacing: -0.045em;
+  }
+
+  .middle {
+    align-self: center;
+    max-width: 980px;
+    margin-top: -14px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 86px;
+    line-height: 1.03;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    color: #ffffff;
+    text-wrap: balance;
+  }
+
+  p {
+    margin: 26px 0 0;
+    font-size: 26px;
+    line-height: 1.42;
+    color: rgba(238, 242, 245, 0.68);
+    max-width: 46ch;
+  }
+
+  .bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid #1e272e;
+    padding-top: 20px;
+  }
+
+  .meta {
+    display: flex;
+    gap: 28px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #7b878f;
+  }
+
+  .meta em {
+    font-style: normal;
+    color: #f0703f;
+  }
+
+  .code {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+    color: #7b878f;
+  }
+
+  .code b {
+    font-weight: 700;
+    color: #f0703f;
+  }
+</style>
+</head>
+<body>
+  <div class="top">
+    <img src="../../docs/assets/brand/airsql-mark-inverse.svg" alt="">
+    <div class="wordmark">Air<span>SQL</span></div>
+  </div>
+
+  <div class="middle">
+    <h1>SQL as a Python function.</h1>
+    <p>AirSQL turns a decorated function into an Airflow task that reads, writes and moves data across PostgreSQL, BigQuery and GCS.</p>
+  </div>
+
+  <div class="bottom">
+    <div class="meta">
+      <em>v0.18.1</em>
+      <span>MIT</span>
+      <span>Airflow 3</span>
+      <span>Python ≥ 3.12</span>
+    </div>
+    <div class="code"><b>@sql</b>.merge(…)</div>
+  </div>
+</body>
+</html>

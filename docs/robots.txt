@@ -1,0 +1,20 @@
+# AirSQL — public documentation.
+# Search / citation crawlers: allowed.
+User-agent: Googlebot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+# Training-only crawlers are not decided here; add explicit rules if the
+# licensing position changes.
+User-agent: *
+Allow: /
+
+Sitemap: https://1cadumagalhaes.github.io/airsql/sitemap.xml

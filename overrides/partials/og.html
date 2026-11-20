@@ -1,0 +1,20 @@
+{%- set og_title = config.site_name if (page and page.url == "") else (page.title if (page and page.title) else config.site_name) -%}
+{%- set og_description = page.meta.description if (page and page.meta and page.meta.description) else config.site_description -%}
+{%- set og_url = page.canonical_url if (page and page.canonical_url) else config.site_url -%}
+{%- set og_image = config.site_url ~ "assets/brand/og-image.png" -%}
+{%- set og_type = "website" if (page and page.url == "") else "article" -%}
+<meta property="og:type" content="{{ og_type }}">
+<meta property="og:site_name" content="{{ config.site_name }}">
+<meta property="og:title" content="{{ og_title }}">
+<meta property="og:description" content="{{ og_description }}">
+<meta property="og:url" content="{{ og_url }}">
+<meta property="og:image" content="{{ og_image }}">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AirSQL — SQL as a Python function.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ og_title }}">
+<meta name="twitter:description" content="{{ og_description }}">
+<meta name="twitter:image" content="{{ og_image }}">
+<meta name="twitter:image:alt" content="AirSQL — SQL as a Python function.">
