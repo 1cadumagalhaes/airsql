@@ -1,4 +1,10 @@
 <p align="center">
+  <a href="https://1cadumagalhaes.github.io/airsql/">
+    <img src="docs/assets/brand/airsql-lockup-stacked.svg" alt="AirSQL" height="120" />
+  </a>
+</p>
+
+<p align="center">
   <strong>A decorator-based SQL execution framework for Apache Airflow</strong>
 </p>
 
